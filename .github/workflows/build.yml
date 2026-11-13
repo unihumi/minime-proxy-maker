@@ -1,0 +1,41 @@
+# Builds unsigned Windows and macOS (Apple Silicon) binaries.
+# Runs on version tags (v*) or manually. BRAW support is NOT included in
+# CI builds because the Blackmagic RAW SDK cannot be redistributed here.
+name: build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        shell: cmd
+        run: scripts\build_windows.bat
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ProxyMaker-windows
+          path: dist/*.exe
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: bash scripts/build_mac.command
+      - name: Zip app
+        run: cd dist && ditto -c -k --keepParent "Proxy Maker.app" ProxyMaker-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ProxyMaker-macos
+          path: dist/ProxyMaker-macos.zip

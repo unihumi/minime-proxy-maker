@@ -1,0 +1,24 @@
+# Build output
+dist/
+build/
+build_tmp/
+*.spec
+
+# Local build caches / third-party binaries (never commit these)
+.venv-build/
+ffbin/
+brawlib/
+braw_sdk/
+
+# Optional private asset (not part of the repository)
+assets/log_animation.gif
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
