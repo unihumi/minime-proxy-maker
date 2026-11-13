@@ -48,8 +48,8 @@ picks them up automatically.
 
 Prebuilt binaries are attached to the
 [Releases](../../releases) page when available. CI builds do **not** include
-BRAW support (the SDK cannot be redistributed by this project); build locally
-for BRAW.
+BRAW support (the Blackmagic RAW SDK is not available to the CI runners and is
+not part of this repository); build locally with the SDK installed for BRAW.
 
 > The macOS app is ad-hoc signed only. On first launch, right-click the app →
 > **Open**, or remove the quarantine flag:
@@ -130,9 +130,22 @@ src/proxymaker/    application source (PySide6)
 Proxy Maker is released under the [MIT License](LICENSE).
 
 The built application bundles third-party software under their own licenses:
-[FFmpeg](https://ffmpeg.org) (GPL build), [Qt for Python / PySide6](https://www.qt.io/qt-for-python)
-(LGPLv3) and – if present at build time – the Blackmagic RAW SDK runtime
-(Blackmagic RAW SDK license). REDline is used if installed but never bundled.
+
+- **[FFmpeg](https://ffmpeg.org)** – the bundled `ffmpeg.exe` is the
+  "essentials" build from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/),
+  licensed under the **GNU GPL v3** (built with `--enable-gpl --enable-version3`).
+  It runs as a separate program and is not linked into Proxy Maker. FFmpeg source
+  code: <https://ffmpeg.org/download.html>; build configuration and
+  corresponding source for the Windows build:
+  <https://www.gyan.dev/ffmpeg/builds/>.
+- **[Qt for Python / PySide6](https://www.qt.io/qt-for-python)** – LGPLv3.
+- **Blackmagic RAW SDK runtime** – only in builds made on a machine where the
+  SDK is installed (such builds include the SDK's runtime libraries, used under
+  the Blackmagic RAW SDK license; the SDK itself – headers, samples, tools – is
+  **not** part of this repository or its releases). Builds without the SDK have
+  no BRAW support.
+- **REDline** is used if installed but never bundled.
+
 DaVinci Resolve, Blackmagic RAW, RED, R3D, ProRes and other names are trademarks
 of their respective owners. This project is not affiliated with them.
 
