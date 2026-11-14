@@ -1,4 +1,4 @@
-"""CPU- und GPU-Auslastung fuer die kleinen Graphen in Proxy Maker.
+"""CPU- und GPU-Auslastung fuer die kleinen Graphen in MiniMe.
 
 CPU:  psutil (macOS + Windows)
 GPU:  Windows - Leistungsindikatoren "GPU Engine" ueber PDH (wie im Task-Manager:

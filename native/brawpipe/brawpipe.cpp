@@ -1,4 +1,4 @@
-// brawpipe - kleines Hilfsprogramm fuer Proxy Maker.
+// brawpipe - kleines Hilfsprogramm fuer MiniMe.
 // Decodiert Blackmagic RAW (.braw) mit dem offiziellen Blackmagic RAW SDK.
 //
 //   brawpipe info  <libdir> <clip.braw> <scale>   Metadaten (key=value)

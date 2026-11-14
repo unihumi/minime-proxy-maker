@@ -1,4 +1,4 @@
-"""Proxy Maker - Encoding-Logik (ohne GUI).
+"""MiniMe - Encoding-Logik (ohne GUI).
 
 Erzeugt Proxy-Dateien in 1:4, 1:2 oder 1:1 der Originalaufloesung (Standard
 1:4) in einem Unterordner "Proxy" neben der Quelldatei oder an einem
@@ -272,7 +272,7 @@ def color_setup(info: Optional["MediaInfo"]) -> tuple[str, list[str]]:
     return scale_mat, tags
 
 
-APP_INFO = {"name": "Proxy Maker", "version": "", "ffmpeg": ""}  # setzt die App
+APP_INFO = {"name": "MiniMe – Proxy Maker", "version": "", "ffmpeg": ""}  # setzt die App
 
 
 def proxy_metadata(src: Path, codec: str, min_size: tuple[int, int],

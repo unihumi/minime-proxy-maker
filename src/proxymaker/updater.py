@@ -1,4 +1,4 @@
-"""Update check: asks GitHub for the latest release of Proxy Maker.
+"""Update check: asks GitHub for the latest release of MiniMe.
 
 Only notifies - nothing is downloaded or installed by the app itself.
 """

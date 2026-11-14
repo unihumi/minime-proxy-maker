@@ -21,7 +21,7 @@ jobs:
         run: scripts\build_windows.bat
       - uses: actions/upload-artifact@v4
         with:
-          name: ProxyMaker-windows
+          name: MiniMe-windows
           path: dist/*.exe
 
   macos:
@@ -37,5 +37,5 @@ jobs:
         run: cd dist && for a in *.app; do ditto -c -k --keepParent "$a" "${a%.app}.zip"; done
       - uses: actions/upload-artifact@v4
         with:
-          name: ProxyMaker-macos
+          name: MiniMe-macos
           path: dist/*.zip

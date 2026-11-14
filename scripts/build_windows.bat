@@ -1,8 +1,8 @@
 @echo off
 setlocal
-rem Baut "Proxy Maker <Version>.exe" mit der neuesten FFmpeg-Version und - falls
+rem Baut "MiniMe.Proxy.Maker.<Version>.exe" mit der neuesten FFmpeg-Version und - falls
 rem das Blackmagic RAW SDK installiert ist - mit BRAW-Unterstuetzung.
-rem Ergebnis: dist\Proxy Maker <Version>.exe (Version aus src\proxymaker\__init__.py)
+rem Ergebnis: dist\MiniMe.Proxy.Maker.<Version>.exe (Version aus src\proxymaker\__init__.py)
 rem Always work from the repository root (this script lives in scripts\)
 cd /d "%~dp0.."
 
@@ -55,11 +55,11 @@ call .venv-build\Scripts\activate.bat
 python -m pip install --upgrade pip
 pip install -r requirements.txt pyinstaller pillow || goto :error
 
-rem Versionsnummer gehoert in den Dateinamen, z.B. "Proxy Maker 1.0.2.exe"
+rem Versionsnummer gehoert in den Dateinamen, z.B. "MiniMe.Proxy.Maker.1.0.3.exe" (Punkte statt Leerzeichen, wie GitHub es bei Release-Dateien macht)
 set "VER="
 for /f "delims=" %%v in ('python -c "import sys; sys.path.insert(0, 'src'); from proxymaker import __version__; print(__version__)"') do set "VER=%%v"
 if not defined VER goto :error
-set "APPNAME=Proxy Maker %VER%"
+set "APPNAME=MiniMe.Proxy.Maker.%VER%"
 echo Version: %VER%
 
 set ICON=

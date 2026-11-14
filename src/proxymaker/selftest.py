@@ -1,4 +1,4 @@
-"""Built-in self test:  "Proxy Maker <version>.exe" --selftest [report.txt]
+"""Built-in self test:  "MiniMe.Proxy.Maker.<version>.exe" --selftest [report.txt]
 
 Checks that a build is complete and working: bundled files, FFmpeg, a real
 render with every codec, the BRAW helper (if bundled) and that the windows can
@@ -55,7 +55,7 @@ def _check(rep: _Report, name: str, fn) -> None:
 def run(report_path: str | None = None) -> int:
     path = Path(report_path) if report_path else Path(tempfile.gettempdir()) / "proxymaker_selftest.txt"
     rep = _Report(path)
-    rep.lines.append(f"Proxy Maker {__version__} self test - {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    rep.lines.append(f"MiniMe - Proxy Maker {__version__} self test - {time.strftime('%Y-%m-%d %H:%M:%S')}")
     rep.lines.append(f"frozen={bool(getattr(sys, 'frozen', False))}  platform={sys.platform}  "
                      f"python={sys.version.split()[0]}")
     rep.flush()

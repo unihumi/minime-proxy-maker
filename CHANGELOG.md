@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## [1.0.3] – unreleased
+
+### Changed
+- **New name: MiniMe – Proxy Maker** (previously "Proxy Maker"). Window title,
+  About window, texts and file name (`MiniMe.Proxy.Maker.1.0.3.exe` /
+  `.app`) use the new name. Settings from earlier versions are kept, and
+  existing proxies still link in DaVinci Resolve as before.
+- **New app icon:** a big and a small film frame with googly eyes looking at
+  each other (the proxy as a "mini me" of the original). Replaces the STEEPTWO
+  logo in the app, taskbar/Dock and README.
+- **Dark and Light themes in the logo's colours:** Dark is navy with cyan
+  accents, Light is a pale blue-grey with navy text and a deeper blue accent.
+  The About and Settings windows use the same navy tones.
+- Rounder corners throughout (drop-down lists now have a slim arrow instead
+  of the square Windows arrow box), a film-strip style border around the drop area,
+  and disabled buttons that are easier to read.
+- The empty drop area has the logo's googly eyes (50 % opacity). They follow
+  the mouse pointer and blink now and then.
+
 ## [1.0.2] – 2026-11-14
 
 ### Added

@@ -1,6 +1,6 @@
 """R3D-Unterstuetzung ueber RED REDline (Teil von REDCINE-X PRO, kostenlos).
 
-FFmpeg kann REDCODE RAW nicht decodieren. Fuer .R3D-Dateien ruft Proxy Maker
+FFmpeg kann REDCODE RAW nicht decodieren. Fuer .R3D-Dateien ruft MiniMe
 deshalb REDline auf, das direkt ProRes 422 Proxy schreibt.
 """
 from __future__ import annotations

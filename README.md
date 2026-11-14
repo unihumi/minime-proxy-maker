@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Proxy Maker" width="320">
+  <img src="assets/logo.png" alt="MiniMe – Proxy Maker" width="320">
 </p>
 
 <p align="center">
@@ -11,7 +11,7 @@
 
 ## What it does
 
-Proxy Maker turns camera originals into small edit-friendly proxy files written
+**MiniMe – Proxy Maker** (formerly just "Proxy Maker") turns camera originals into small edit-friendly proxy files written
 into a `Proxy` folder next to each source file. Because proxies keep the
 **same name, timecode and frame rate**, DaVinci Resolve picks them up
 automatically.
@@ -59,7 +59,7 @@ locally with the SDK installed for BRAW.
 
 > The macOS app is ad-hoc signed only. On first launch, right-click the app →
 > **Open**, or remove the quarantine flag:
-> `xattr -dr com.apple.quarantine "Proxy Maker 1.0.2.app"` (use your version)
+> `xattr -dr com.apple.quarantine "MiniMe.Proxy.Maker.1.0.3.app"` (use your version)
 
 ## Building
 
@@ -77,7 +77,7 @@ Blackmagic RAW SDK.
 scripts\build_windows.bat
 ```
 
-Result: `dist\Proxy Maker <version>.exe`, e.g. `Proxy Maker 1.0.2.exe`
+Result: `dist\MiniMe.Proxy.Maker.<version>.exe`, e.g. `MiniMe.Proxy.Maker.1.0.3.exe`
 
 ### macOS (Apple Silicon)
 
@@ -88,7 +88,7 @@ Requirements: Python 3.10+ (e.g. via Homebrew) and the Xcode Command Line Tools
 bash scripts/build_mac.command
 ```
 
-Result: `dist/Proxy Maker <version>.app`, e.g. `Proxy Maker 1.0.2.app`
+Result: `dist/MiniMe.Proxy.Maker.<version>.app`, e.g. `MiniMe.Proxy.Maker.1.0.3.app`
 
 ### BRAW support
 
@@ -102,7 +102,7 @@ ends with a line saying whether BRAW was included.
 ### RED R3D support
 
 R3D files are decoded with RED's free **REDline** command-line tool (part of
-REDCINE-X PRO). It is not bundled; Proxy Maker finds it automatically when it
+REDCINE-X PRO). It is not bundled; MiniMe finds it automatically when it
 is installed in its default location.
 
 ## Running from source
@@ -129,14 +129,14 @@ src/proxymaker/    application source (PySide6)
 
 ## License
 
-Proxy Maker is released under the [MIT License](LICENSE).
+MiniMe is released under the [MIT License](LICENSE).
 
 The built application bundles third-party software under their own licenses:
 
 - **FFmpeg** – the bundled `ffmpeg.exe` is the "essentials" build from
   [gyan.dev](https://www.gyan.dev/ffmpeg/builds/), licensed under **GNU GPL
   v3** (built with `--enable-gpl --enable-version3`). It runs as a separate
-  program, not linked into Proxy Maker. Source: <https://ffmpeg.org/download.html>;
+  program, not linked into MiniMe. Source: <https://ffmpeg.org/download.html>;
   build config and corresponding source: <https://www.gyan.dev/ffmpeg/builds/>.
 - **[Qt for Python / PySide6](https://www.qt.io/qt-for-python)** – LGPLv3.
 - **Blackmagic RAW SDK runtime** – only in builds made on a machine where the

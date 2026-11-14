@@ -1,6 +1,8 @@
-"""Proxy Maker - GUI (PySide6), Deutsch / English."""
+"""MiniMe - GUI (PySide6), Deutsch / English."""
 from __future__ import annotations
 
+import math
+import random
 import sys
 import threading
 from collections import deque
@@ -11,7 +13,7 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import (
-    QBrush, QColor, QDesktopServices, QFont, QFontMetrics, QGradient,
+    QBrush, QColor, QCursor, QDesktopServices, QFont, QFontMetrics, QGradient,
     QGuiApplication, QIcon,
     QLinearGradient, QPainter,
     QMovie, QPainterPath, QPen, QPixmap, QPolygonF,
@@ -29,7 +31,8 @@ from . import core, diskcheck, power, watch
 from .paths import ROOT
 
 # ---------------------------------------------------------------- Branding
-APP_NAME = "Proxy Maker"
+APP_NAME = "MiniMe – Proxy Maker"       # Titel, Dateiname, Metadaten
+SETTINGS_NAME = "Proxy Maker"           # unveraendert, damit Einstellungen von 1.0.x erhalten bleiben
 APP_VERSION = __version__
 CONTACT = "hello@steeptwo.com"
 ACCENT = "#3d8bfd"      # Akzentfarbe im Terminal
@@ -83,21 +86,26 @@ def _rgb(c: str, alpha: int = 255) -> tuple[int, int, int, int]:
     return (int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16), alpha)
 
 
-def _darker(c: str, f: float = 0.95) -> str:
-    return "#" + "".join(f"{round(int(c[i:i + 2], 16) * f):02x}" for i in (1, 3, 5))
+def qcolor(c: str) -> QColor:
+    """QColor aus "#rrggbb", Farbnamen oder CSS "rgba(r,g,b,a)" (a = 0..255)."""
+    if c.startswith("rgba("):
+        r, g, b, a = (int(float(v)) for v in c[5:-1].split(","))
+        return QColor(r, g, b, a)
+    return QColor(c)
+
 
 
 def _solid_theme(bg: str, text: str, accent: str, on_accent: str,
                  panel: str, ctrl: str, list_bg: str, bar_bg: str,
                  term_bg: str, term_text: str, graph_colors: tuple) -> dict:
     """Hell/Dunkel. Aktive Buttons = volle Akzentfarbe,
-    ausgegraute = 50 % Akzent + Hintergrund."""
-    dis = _mix(accent, bg, 0.5)
+    ausgegraute = 55 % Akzent + Hintergrund, Schrift gut lesbar."""
+    dis = _mix(accent, bg, 0.55)
     return dict(
         rainbow=False, bg=bg, text=text, hint=_mix(text, bg, 0.7), accent=accent,
         panel=panel, ctrl=ctrl,
         btn=accent, btn_hover=_mix(accent, text, 0.85), btn_text=on_accent,
-        btn_dis=dis, btn_dis_text=_mix(on_accent, dis, 0.55),
+        btn_dis=dis, btn_dis_text=_mix(on_accent, dis, 0.75),
         start=accent, start_hover=_mix(accent, text, 0.85), start_text=on_accent,
         start_dis=dis,
         drop_bg=panel, drop_border=accent, drop_hover=_mix(accent, text, 0.7),
@@ -111,19 +119,22 @@ def _solid_theme(bg: str, text: str, accent: str, on_accent: str,
     )
 
 
-# Dunkel: wie zuvor, Akzent sehr helles Mintgruen
+# Farben aus dem Logo: Navy #131d3b, Cyan #08c7fe, Weiss
+LOGO_NAVY = "#131d3b"
+LOGO_CYAN = "#08c7fe"
+# Dunkel ("Navy-Nacht"): Navy-Toene, Akzent = Logo-Cyan
 THEMES["dark"] = _solid_theme(
-    bg="#1c1d21", text="#e8e8ea", accent="#b8f5d6", on_accent="#1c1d21",
-    panel="#26282e", ctrl="#32343c", list_bg="#17181b", bar_bg="#111214",
-    term_bg="#111214", term_text="#b9bbc2",
-    graph_colors=("#b8f5d6", "#7fd6ff", "#ffb86b", "#d6a2ff", "#7fd6ff"))
-# Hell: farblos, alles 5 % dunkler als zuvor, Akzent Petrol
-_d = _darker
+    bg="#0f1729", text="#e6edf7", accent=LOGO_CYAN, on_accent="#0b1324",
+    panel="#16213a", ctrl="#1e2b48", list_bg="#0c1322", bar_bg="#0a101d",
+    term_bg="#0a101d", term_text="#a9b6cc",
+    graph_colors=(LOGO_CYAN, "#ffffff", "#ffb86b", "#d6a2ff", "#7fe0a0"))
+# Hell ("Papier-Blau"): helles Blaugrau, Text = Logo-Navy, Akzent = dunkleres
+# Logo-Blau (das Cyan selbst ist auf Weiss zu blass fuer Schrift und Rahmen)
 THEMES["light"] = _solid_theme(
-    bg=_d("#f2f3f5"), text="#1d1e22", accent="#1f6f78", on_accent="#ffffff",
-    panel=_d("#ffffff"), ctrl=_d("#e4e6ea"), list_bg=_d("#f7f8fa"),
-    bar_bg=_d("#dcdfe5"), term_bg=_d("#fbfbfc"), term_text="#1d1e22",
-    graph_colors=("#1f6f78", "#1f6fb8", "#c9731a", "#7a3fc0", "#1f6fb8"))
+    bg="#eaf1f8", text=LOGO_NAVY, accent="#0a78b4", on_accent="#ffffff",
+    panel="#f8fbfe", ctrl="#dbe6f2", list_bg="#f3f7fb", bar_bg="#d3e0ee",
+    term_bg="#f8fbfe", term_text=LOGO_NAVY,
+    graph_colors=("#0a78b4", LOGO_NAVY, "#c9731a", "#7a3fc0", "#1f9d6b"))
 THEMES = {k: THEMES[k] for k in ("rainbow", "light", "dark")}  # Reihenfolge im Menue
 # Kopf-Icons (Theme, Sprache, Einstellungen, Hilfe): ohne Umrandung, dafuer mit
 # Schlagschatten: (Deckkraft, Weichheit) je Theme. Auf Hell enger und kraeftiger,
@@ -187,8 +198,8 @@ STRINGS = {
         "braw_missing": "Blackmagic-RAW-Unterstützung ist in diesem Build nicht "
                         "enthalten (BRAW-SDK fehlte beim Bauen).",
         "braw_found": "Blackmagic RAW: aktiv",
-        "about_tip": "Über Proxy Maker",
-        "about_title": "Über Proxy Maker",
+        "about_tip": "Über MiniMe",
+        "about_title": "Über MiniMe",
         "about_version": "Version {v}",
         "about_body": (
             "Erstellt Proxy-Dateien, damit sich hochauflösendes Material "
@@ -221,7 +232,7 @@ STRINGS = {
         "update_auto": "Automatisch nach Updates suchen",
         "update_now": "Jetzt prüfen",
         "update_checking": "Suche …",
-        "update_current": "Proxy Maker ist auf dem neuesten Stand.",
+        "update_current": "MiniMe ist auf dem neuesten Stand.",
         "update_failed": "Prüfung nicht möglich (keine Verbindung?).",
         "update_title": "Update verfügbar",
         "update_question": "Neue Version verfügbar. Jetzt herunterladen?\n\n"
@@ -252,7 +263,7 @@ STRINGS = {
                           "Dateien kommen erst dazu, wenn sie 30 Sekunden lang "
                           "unverändert waren (fertig kopiert). Ändert sich eine Datei "
                           "danach noch, wird ihr Proxy neu erstellt. Nur solange "
-                          "Proxy Maker geöffnet ist.",
+                          "MiniMe geöffnet ist.",
         "set_add": "Hinzufügen…",
         "set_remove": "Entfernen",
         "set_power": "Beim Rendern",
@@ -264,7 +275,7 @@ STRINGS = {
                           "abbrechen lässt. Gilt nur für diese Sitzung und ist nicht "
                           "verfügbar, solange Ordner überwacht werden.",
         "set_update_auto": "Automatisch prüfen",
-        "set_update_info": "Beim Start fragt Proxy Maker bei GitHub nach, ob es eine "
+        "set_update_info": "Beim Start fragt MiniMe bei GitHub nach, ob es eine "
                            "neuere Version gibt, und bietet dann die Download-Seite "
                            "an. Es wird nichts automatisch heruntergeladen.",
         "set_after": "Wenn fertig:",
@@ -291,7 +302,7 @@ STRINGS = {
                      "• Ändert sich eine Datei danach noch (z.B. weil ein Kopiervorgang "
                      "pausiert hatte), wird ihr Proxy gelöscht und neu erstellt.\n"
                      "• Bereits vorhandene Proxies werden nie angefasst.\n"
-                     "• Nur solange Proxy Maker geöffnet ist.",
+                     "• Nur solange MiniMe geöffnet ist.",
         "disk_checking": "Prüfe Speicherplatz …",
         "disk_title": "Zu wenig Speicherplatz?",
         "disk_question": "Die Proxies brauchen voraussichtlich mehr Platz, als frei "
@@ -349,9 +360,9 @@ STRINGS = {
         "log_toggle": "Log",
         "perf_low": "Schonend",
         "perf_high": "Maximal",
-        "perf_tip": "Schonend: Proxy Maker läuft mit niedriger Priorität, Resolve "
+        "perf_tip": "Schonend: MiniMe läuft mit niedriger Priorität, Resolve "
                     "und andere Programme haben Vorrang.\nMaximal: volle Leistung "
-                    "für Proxy Maker.\n\nEs laufen immer bis zu 4 Dateien "
+                    "für MiniMe.\n\nEs laufen immer bis zu 4 Dateien "
                     "gleichzeitig, Grafikkarte und Hardware-Encoder werden genutzt, "
                     "wo möglich.",
         "active": "aktiv",
@@ -414,8 +425,8 @@ STRINGS = {
         "braw_missing": "Blackmagic RAW support is not included in this build "
                         "(the BRAW SDK was missing at build time).",
         "braw_found": "Blackmagic RAW: enabled",
-        "about_tip": "About Proxy Maker",
-        "about_title": "About Proxy Maker",
+        "about_tip": "About MiniMe",
+        "about_title": "About MiniMe",
         "about_version": "Version {v}",
         "about_body": (
             "Creates proxy files so that high-resolution footage edits "
@@ -447,7 +458,7 @@ STRINGS = {
         "update_auto": "Check for updates automatically",
         "update_now": "Check now",
         "update_checking": "Checking …",
-        "update_current": "Proxy Maker is up to date.",
+        "update_current": "MiniMe is up to date.",
         "update_failed": "Could not check (no connection?).",
         "update_title": "Update available",
         "update_question": "New version available. Do you want to download?\n\n"
@@ -477,7 +488,7 @@ STRINGS = {
         "set_watch_hint": "Checked every 10 seconds, including subfolders. Files are "
                           "only added once they have been unchanged for 30 seconds "
                           "(finished copying). If a file still changes afterwards, "
-                          "its proxy is re-created. Only while Proxy Maker is open.",
+                          "its proxy is re-created. Only while MiniMe is open.",
         "set_add": "Add…",
         "set_remove": "Remove",
         "set_power": "While rendering",
@@ -488,7 +499,7 @@ STRINGS = {
                           "cancelled. Applies to this session only and isn't "
                           "available while watch folders are active.",
         "set_update_auto": "Check automatically",
-        "set_update_info": "At startup Proxy Maker asks GitHub whether a newer "
+        "set_update_info": "At startup MiniMe asks GitHub whether a newer "
                            "version exists and then offers the download page. "
                            "Nothing is downloaded automatically.",
         "set_after": "When finished:",
@@ -515,7 +526,7 @@ STRINGS = {
                      "• If a file still changes afterwards (e.g. a paused copy "
                      "resumed), its proxy is deleted and re-created.\n"
                      "• Proxies that already existed are never touched.\n"
-                     "• Only while Proxy Maker is open.",
+                     "• Only while MiniMe is open.",
         "disk_checking": "Checking disk space …",
         "disk_title": "Not enough disk space?",
         "disk_question": "The proxies will probably need more space than is "
@@ -572,8 +583,8 @@ STRINGS = {
         "log_toggle": "Log",
         "perf_low": "Gentle",
         "perf_high": "Maximum",
-        "perf_tip": "Gentle: Proxy Maker runs at low priority, Resolve and other "
-                    "apps come first.\nMaximum: full power for Proxy Maker.\n\n"
+        "perf_tip": "Gentle: MiniMe runs at low priority, Resolve and other "
+                    "apps come first.\nMaximum: full power for MiniMe.\n\n"
                     "Up to 4 files are always processed at once; the graphics card "
                     "and hardware encoders are used where possible.",
         "active": "active",
@@ -602,7 +613,7 @@ def logline(tag: str, name: str, extra: str = "") -> str:
 
 
 def settings() -> QSettings:
-    return QSettings("STEEPTWO", APP_NAME)
+    return QSettings("STEEPTWO", SETTINGS_NAME)
 
 
 def asset(name: str) -> Path:
@@ -1306,7 +1317,7 @@ class StatusBar(QFrame):
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect())
         path = QPainterPath()
-        path.addRoundedRect(r, 8, 8)
+        path.addRoundedRect(r, 12, 12)
         p.setClipPath(path)
         p.fillRect(r, QColor(T["term_bg"]))
         if self.progress > 0:
@@ -1318,9 +1329,124 @@ class StatusBar(QFrame):
         p.end()
 
 
+class GooglyEyes(QWidget):
+    """Die Augen aus dem Logo in der leeren Ablageflaeche: schauen zum
+    Mauszeiger und blinzeln ab und zu. 50 % Deckkraft, damit sie nur dezent
+    im Hintergrund bleiben. Der Timer laeuft nur, solange sie sichtbar sind."""
+
+    R = 14            # Radius eines Auges
+    GAP = 1           # Abstand zwischen den Augen (fast beruehrend)
+    PUPIL = 0.5       # Pupille relativ zum Auge
+    TICK_MS = 40      # ~25 Bilder/s
+    BLINK_MS = 160
+    OPACITY = 0.5
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(4 * self.R + self.GAP + 4, 2 * self.R + 4)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        fx = QGraphicsOpacityEffect(self)
+        fx.setOpacity(self.OPACITY)
+        self.setGraphicsEffect(fx)
+        self._look = (QPointF(), QPointF())   # Pupillen-Versatz je Auge
+        self._blink = -1                       # ms seit Blinzel-Beginn, -1 = offen
+        self._next_blink = self._blink_delay()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+
+    @staticmethod
+    def _blink_delay() -> int:
+        return random.randint(3000, 7000)
+
+    def _centres(self) -> tuple[QPointF, QPointF]:
+        y = self.height() / 2
+        x1 = 2 + self.R
+        return QPointF(x1, y), QPointF(x1 + 2 * self.R + self.GAP, y)
+
+    def showEvent(self, e):
+        self._timer.start(self.TICK_MS)
+        super().showEvent(e)
+
+    def hideEvent(self, e):
+        self._timer.stop()  # unsichtbar (Liste gefuellt, Fenster minimiert) -> ruhen
+        super().hideEvent(e)
+
+    def _tick(self):
+        dirty = False
+        # Blinzeln
+        if self._blink >= 0:
+            self._blink += self.TICK_MS
+            if self._blink > self.BLINK_MS:
+                self._blink = -1
+                self._next_blink = self._blink_delay()
+            dirty = True
+        else:
+            self._next_blink -= self.TICK_MS
+            if self._next_blink <= 0:
+                self._blink = 0
+                dirty = True
+        # Blick zum Mauszeiger (auch ausserhalb des Fensters)
+        cursor = QPointF(self.mapFromGlobal(QCursor.pos()))
+        reach = self.R * (1 - self.PUPIL) - 1.5
+        look = []
+        for c in self._centres():
+            d = cursor - c
+            dist = math.hypot(d.x(), d.y())
+            k = 0.0 if dist < 0.5 else reach * min(1.0, dist / 120) / dist
+            look.append(QPointF(round(d.x() * k, 1), round(d.y() * k, 1)))
+        look = tuple(look)
+        if look != self._look:
+            self._look = look
+            dirty = True
+        if dirty:
+            self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        # beim Blinzeln: Auge kurz zusammendruecken (Dreieck 1 -> 0.1 -> 1)
+        squash = 1.0
+        if self._blink >= 0:
+            t = self._blink / self.BLINK_MS
+            squash = max(0.1, abs(1 - 2 * t))
+        navy = QColor(LOGO_NAVY)
+        for c, off in zip(self._centres(), self._look):
+            p.setPen(QPen(navy, 1.5))
+            p.setBrush(QColor("white"))
+            p.drawEllipse(c, self.R, self.R * squash)
+            if squash > 0.5:
+                pr = self.R * self.PUPIL
+                p.setPen(Qt.NoPen)
+                p.setBrush(navy)
+                p.drawEllipse(c + off, pr, pr * squash)
+        p.end()
+
+
 class QueueArea(QFrame):
-    """Warteschlange und Ablageflaeche in einem. Leer: nur der Hinweis."""
+    """Warteschlange und Ablageflaeche in einem. Leer: nur der Hinweis.
+    Der Rahmen wird selbst gezeichnet: kurze, eckige Striche wie die
+    Perforation eines Filmstreifens (Stylesheet-"dashed" laesst sich nicht
+    einstellen)."""
     dropped = Signal(list)
+
+    RADIUS = 14
+    PEN = 2.5
+    DASH = (1.6, 1.6)   # Strich, Luecke - in Vielfachen der Strichbreite (= 4 px / 4 px)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)  # Hintergrund aus dem Stylesheet
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        hover = bool(self.property("hover"))
+        pen = QPen(qcolor(T["drop_hover"] if hover else T["drop_border"]), self.PEN)
+        pen.setCapStyle(Qt.FlatCap)
+        pen.setDashPattern(list(self.DASH))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        h = self.PEN / 2
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(h, h, -h, -h),
+                          self.RADIUS - h, self.RADIUS - h)
+        p.end()
 
     def __init__(self):
         super().__init__()
@@ -1336,6 +1462,9 @@ class QueueArea(QFrame):
         empty.setObjectName("emptyPage")
         el = QVBoxLayout(empty)
         el.addStretch()
+        self.eyes = GooglyEyes()
+        el.addWidget(self.eyes, 0, Qt.AlignHCenter)
+        el.addSpacing(10)
         self.empty_label = QLabel()
         self.empty_label.setObjectName("emptyHint")
         self.empty_label.setAlignment(Qt.AlignCenter)
@@ -1382,11 +1511,13 @@ class QueueArea(QFrame):
         if e.mimeData().hasUrls():
             self.setProperty("hover", True)
             self.style().polish(self)
+            self.update()
             e.acceptProposedAction()
 
     def dragLeaveEvent(self, e):
         self.setProperty("hover", False)
         self.style().polish(self)
+        self.update()
 
     def dropEvent(self, e):
         self.dragLeaveEvent(e)
@@ -2657,6 +2788,29 @@ class MainWindow(QMainWindow):
         e.accept()
 
 
+_ARROWS: dict[str, str] = {}
+
+
+def arrow_svg(color: str) -> str:
+    """Pfeil (Chevron) fuer Aufklapplisten als kleine SVG-Datei in der Farbe des
+    Themes. Sobald ::drop-down per Stylesheet gestaltet wird, zeichnet Qt den
+    Windows-Pfeil nicht mehr - deshalb ein eigener. Liefert den Pfad fuer url()."""
+    if color not in _ARROWS:
+        import tempfile
+        c = qcolor(color)
+        folder = Path(tempfile.gettempdir()) / "minime_ui"
+        folder.mkdir(exist_ok=True)
+        f = folder / f"arrow_{c.red():02x}{c.green():02x}{c.blue():02x}_{c.alpha()}.svg"
+        if not f.exists():
+            f.write_text(
+                '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6" viewBox="0 0 10 6">'
+                f'<path d="M1 1 L5 5 L9 1" fill="none" stroke="{c.name()}" '
+                f'stroke-opacity="{c.alphaF():.2f}" stroke-width="1.6" '
+                'stroke-linecap="round" stroke-linejoin="round"/></svg>', encoding="utf-8")
+        _ARROWS[color] = f.as_posix()
+    return _ARROWS[color]
+
+
 def make_style() -> str:
     t = T
     mono = '"SF Mono", Menlo, Consolas, "Courier New", monospace'
@@ -2664,7 +2818,7 @@ def make_style() -> str:
 QWidget {{ color: {t['text']}; font-size: 13px; }}
 QMainWindow {{ background: {t['bg']}; }}
 QLabel {{ background: transparent; }}
-QToolTip {{ background: #1c1d21; color: #e8e8ea; border: 1px solid #4a4c55; padding: 6px;
+QToolTip {{ background: #16213a; color: #e6edf7; border: 1px solid #2b3a5c; padding: 6px;
     max-width: 360px; }}
 #title {{ font-size: 19px; font-weight: 600; color: {t['text']}; }}
 
@@ -2678,15 +2832,21 @@ QPushButton#flag:hover {{ background: {t['panel']}; border-radius: 4px; }}
 
 /* Optionszeile */
 QComboBox, QSpinBox {{ background: {t['ctrl']}; color: {t['text']}; border: none;
-    border-radius: 6px; padding: 5px 10px; }}
+    border-radius: 10px; padding: 5px 10px; }}
+QComboBox {{ padding-right: 26px; }}
+QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: center right;
+    width: 24px; border: none; background: transparent; }}
+QComboBox::down-arrow {{ image: url("{arrow_svg(t['text'])}"); width: 10px; height: 6px; }}
+QComboBox::down-arrow:disabled {{ image: url("{arrow_svg(t['hint'])}"); }}
+QComboBox:hover {{ background: {_mix(t['ctrl'], t['text'], 0.9) if t['ctrl'].startswith('#') else t['ctrl']}; }}
 QComboBox QAbstractItemView {{ background: {t['popup_bg']}; color: {t['text']};
     selection-background-color: {t['popup_sel']}; selection-color: {t['text']};
     border: none; outline: none; }}
 #info {{ color: {t['hint']}; font-size: 16px; padding: 0 4px; }}
-#infoPop {{ background: #1c1d21; color: #e8e8ea; border: 1px solid #4a4c55;
-    border-radius: 6px; padding: 8px 10px; font-size: 12px; }}
+#infoPop {{ background: #16213a; color: #e6edf7; border: 1px solid #2b3a5c;
+    border-radius: 10px; padding: 8px 10px; font-size: 12px; }}
 QPushButton#perf {{ background: transparent; color: {t['hint']};
-    border: 1.5px solid {t['help_border']}; border-radius: 7px; padding: 4px 12px; }}
+    border: 1.5px solid {t['help_border']}; border-radius: 12px; padding: 4px 12px; }}
 QPushButton#perf:checked {{ background: {t['start']}; color: {t['start_text']};
     border-color: {t['start']}; font-weight: 600; }}
 QPushButton#perf:hover {{ border-color: {t['text']}; }}
@@ -2695,9 +2855,7 @@ QPushButton#themeBtn {{ background: transparent; border: none;
 QPushButton#themeBtn:hover {{ background: {t['panel']}; }}
 
 /* Warteschlange = Ablageflaeche */
-#queueArea {{ background: {t['panel']}; border: 2px dashed {t['drop_border']};
-    border-radius: 12px; }}
-#queueArea[hover="true"] {{ border-color: {t['drop_hover']}; }}
+#queueArea {{ background: {t['panel']}; border: none; border-radius: 14px; }}
 #emptyPage {{ background: transparent; }}
 #emptyHint {{ font-size: 16px; color: {t['text']}; }}
 #emptyOr {{ color: {t['hint']}; }}
@@ -2708,7 +2866,7 @@ QPushButton#themeBtn:hover {{ background: {t['panel']}; }}
 #rowStatus {{ color: {t['hint']}; font-size: 12px; }}
 #rowStatus[state="run"], #rowStatus[state="done"] {{ color: {t['term_accent']}; }}
 #rowStatus[state="error"] {{ color: #ff6b6b; font-weight: 600; }}
-QComboBox#queueCodec {{ padding: 1px 8px; font-size: 12px; min-width: 64px; }}
+QComboBox#queueCodec {{ padding: 1px 22px 1px 8px; font-size: 12px; min-width: 64px; }}
 QPushButton#rowX {{ background: transparent; color: {t['hint']}; border: none;
     padding: 0; font-size: 15px; }}
 QPushButton#rowX:hover {{ color: {t['text']}; }}
@@ -2718,17 +2876,17 @@ QPushButton#rowX:disabled {{ background: transparent; color: transparent; }}
 #totalBar {{ background: transparent; border: none; border-radius: 0; }}
 #totalBar::chunk {{ background: {t['chunk']}; }}
 QPushButton#add {{ background: {t['start']}; color: {t['start_text']}; border: none;
-    border-radius: 8px; padding: 6px 16px; font-weight: 600; }}
+    border-radius: 12px; padding: 6px 16px; font-weight: 600; }}
 QPushButton#add::menu-indicator {{ image: none; width: 0; }}
 QPushButton#add:hover {{ background: {t['start_hover']}; }}
 
 /* Buttons */
 QPushButton {{ background: {t['btn']}; color: {t['btn_text']}; border: none;
-    border-radius: 6px; padding: 7px 14px; }}
+    border-radius: 10px; padding: 7px 14px; }}
 QPushButton:hover {{ background: {t['btn_hover']}; }}
 QPushButton:disabled {{ background: {t['btn_dis']}; color: {t['btn_dis_text']}; }}
 QPushButton#start {{ background: {t['start']}; color: {t['start_text']};
-    font-weight: 700; padding: 8px 22px; border-radius: 8px; }}
+    font-weight: 700; padding: 8px 22px; border-radius: 12px; }}
 QPushButton#start:hover {{ background: {t['start_hover']}; }}
 QPushButton#start:disabled {{ background: {t['start_dis']}; color: {t['btn_dis_text']}; }}
 QPushButton#link {{ background: transparent; color: {t['hint']}; border: none;
@@ -2744,7 +2902,7 @@ QMenu::item:selected {{ background: {t['popup_sel']}; }}
 #footer, #spinner {{ color: {t['term_accent']}; font-family: {mono}; font-size: 12px; }}
 #spinner {{ font-weight: 700; }}
 #statusBar QPushButton#link {{ color: {t['term_text']}; }}
-#term {{ background: {t['term_bg']}; border-radius: 8px; }}
+#term {{ background: {t['term_bg']}; border-radius: 12px; }}
 #term QPlainTextEdit {{ background: {t['term_bg']}; color: {t['term_text']}; border: none;
     font-family: {mono}; font-size: 12px; }}
 #term QScrollBar {{ background: {t['term_bg']}; border: none; }}
@@ -2756,40 +2914,44 @@ QMenu::item:selected {{ background: {t['popup_sel']}; }}
 #term QScrollBar::add-page, #term QScrollBar::sub-page {{ background: {t['term_bg']}; }}
 
 /* About bleibt dunkel */
-QDialog#about {{ background: {PANEL}; }}
+QDialog#about {{ background: #111a2e; }}
 QDialog#about QLabel {{ color: {TEXT}; }}
 #aboutName {{ font-size: 20px; font-weight: 600; color: white; }}
-#aboutVersion {{ color: {ACCENT}; font-family: {mono}; }}
+#aboutVersion {{ color: {LOGO_CYAN}; font-family: {mono}; }}
 #aboutText {{ font-size: 13px; }}
-#aboutSmall {{ color: #8b8d94; font-size: 11px; }}
-QDialog#about QPushButton {{ background: #2c2e35; color: white; }}
-QDialog#about QPushButton:hover {{ background: #383a43; }}
+#aboutSmall {{ color: #8494b0; font-size: 11px; }}
+QDialog#about QPushButton {{ background: #1e2b48; color: white; }}
+QDialog#about QPushButton:hover {{ background: #283859; }}
 
 /* Einstellungen: ebenfalls immer dunkel */
-QDialog#settings, QDialog#settings #setBody {{ background: {PANEL}; }}
-QDialog#settings QScrollArea {{ background: {PANEL}; border: none; }}
-QDialog#settings QScrollBar:vertical {{ background: {PANEL}; width: 10px; border: none; }}
-QDialog#settings QScrollBar::handle:vertical {{ background: #3a3d46; border-radius: 4px;
+QDialog#settings, QDialog#settings #setBody {{ background: #111a2e; }}
+QDialog#settings QScrollArea {{ background: #111a2e; border: none; }}
+QDialog#settings QScrollBar:vertical {{ background: #111a2e; width: 10px; border: none; }}
+QDialog#settings QScrollBar::handle:vertical {{ background: #2b3a5c; border-radius: 4px;
     min-height: 24px; }}
 QDialog#settings QScrollBar::add-line, QDialog#settings QScrollBar::sub-line {{
     width: 0; height: 0; }}
 QDialog#settings QLabel, QDialog#settings QCheckBox,
 QDialog#settings QRadioButton {{ color: {TEXT}; }}
 QDialog#settings #setHead {{ color: white; font-weight: 600; }}
-QDialog#settings #info {{ color: #8b8d94; font-size: 14px; padding: 0 2px; }}
-QDialog#settings QComboBox, QDialog#settings QLineEdit {{ background: #2c2e35;
-    color: {TEXT}; border: none; border-radius: 6px; padding: 5px 10px; }}
-QDialog#settings QLineEdit:disabled {{ color: #6b6d74; }}
-QDialog#settings QComboBox QAbstractItemView {{ background: #2c2e35; color: {TEXT};
-    selection-background-color: #3a3d46; border: none; outline: none; }}
-QDialog#settings QListWidget {{ background: #1c1d21; color: {TEXT}; border: none;
-    border-radius: 6px; font-family: {mono}; font-size: 12px; }}
-QDialog#settings QListWidget::item:selected {{ background: #3a3d46; color: white; }}
-QDialog#settings QPushButton {{ background: #2c2e35; color: white; }}
-QDialog#settings QPushButton:hover {{ background: #383a43; }}
-QDialog#settings QPushButton:disabled {{ color: #6b6d74; }}
+QDialog#settings #info {{ color: #8494b0; font-size: 14px; padding: 0 2px; }}
+QDialog#settings QComboBox, QDialog#settings QLineEdit {{ background: #1e2b48;
+    color: {TEXT}; border: none; border-radius: 10px; padding: 5px 10px; }}
+QDialog#settings QComboBox {{ padding-right: 26px; }}
+QDialog#settings QComboBox:hover {{ background: #283859; }}
+QDialog#settings QComboBox::down-arrow {{ image: url("{arrow_svg(TEXT)}"); }}
+QDialog#settings QComboBox::down-arrow:disabled {{ image: url("{arrow_svg('#5d6b86')}"); }}
+QDialog#settings QLineEdit:disabled {{ color: #5d6b86; }}
+QDialog#settings QComboBox QAbstractItemView {{ background: #1e2b48; color: {TEXT};
+    selection-background-color: #2b3a5c; border: none; outline: none; }}
+QDialog#settings QListWidget {{ background: #0c1322; color: {TEXT}; border: none;
+    border-radius: 10px; font-family: {mono}; font-size: 12px; }}
+QDialog#settings QListWidget::item:selected {{ background: #2b3a5c; color: white; }}
+QDialog#settings QPushButton {{ background: #1e2b48; color: white; }}
+QDialog#settings QPushButton:hover {{ background: #283859; }}
+QDialog#settings QPushButton:disabled {{ color: #5d6b86; }}
 QDialog#settings QComboBox:disabled, QDialog#settings QCheckBox:disabled,
-QDialog#settings QRadioButton:disabled {{ color: #6b6d74; }}
+QDialog#settings QRadioButton:disabled {{ color: #5d6b86; }}
 """
 
 
