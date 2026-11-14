@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## [1.0.3] – unreleased
+## [1.0.3] – 2026-11-14
 
 ### Changed
 - **New name: MiniMe – Proxy Maker** (previously "Proxy Maker"). Window title,
