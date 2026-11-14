@@ -7,23 +7,25 @@ from collections import deque
 from pathlib import Path
 
 from PySide6.QtCore import (
-    QLocale, QPoint, QPointF, QRectF, QSettings, QSize, Qt, QThread, QTimer, Signal,
+    QLocale, QPoint, QPointF, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl,
+    Signal,
 )
 from PySide6.QtGui import (
-    QBrush, QColor, QFont, QFontMetrics, QGradient, QGuiApplication, QIcon,
+    QBrush, QColor, QDesktopServices, QFont, QFontMetrics, QGradient,
+    QGuiApplication, QIcon,
     QLinearGradient, QPainter,
     QMovie, QPainterPath, QPen, QPixmap, QPolygonF,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QComboBox, QDialog, QFileDialog, QFrame,
-    QGraphicsOpacityEffect,
-    QGridLayout, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow,
-    QMenu, QPlainTextEdit, QProgressBar, QPushButton, QSizePolicy, QSpinBox,
+    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog,
+    QFileDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
+    QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QRadioButton, QScrollArea, QProgressBar, QPushButton, QSizePolicy, QSpinBox,
     QStackedLayout, QVBoxLayout, QWidget,
 )
 
-from . import __version__, accel, braw, monitor, redline, taskbar
-from . import core
+from . import __version__, accel, braw, monitor, redline, taskbar, updater
+from . import core, diskcheck, power, watch
 from .paths import ROOT
 
 # ---------------------------------------------------------------- Branding
@@ -123,13 +125,19 @@ THEMES["light"] = _solid_theme(
     bar_bg=_d("#dcdfe5"), term_bg=_d("#fbfbfc"), term_text="#1d1e22",
     graph_colors=("#1f6f78", "#1f6fb8", "#c9731a", "#7a3fc0", "#1f6fb8"))
 THEMES = {k: THEMES[k] for k in ("rainbow", "light", "dark")}  # Reihenfolge im Menue
+# Kopf-Icons (Theme, Sprache, Einstellungen, Hilfe): ohne Umrandung, dafuer mit
+# Schlagschatten: (Deckkraft, Weichheit) je Theme. Auf Hell enger und kraeftiger,
+# damit sich das helle Zahnrad-Emoji vom hellen Hintergrund abhebt.
+THEMES["rainbow"]["icon_shadow"] = (190, 12)
+THEMES["dark"]["icon_shadow"] = (190, 12)
+THEMES["light"]["icon_shadow"] = (235, 6)
 T = THEMES["rainbow"]  # aktuelles Theme (wird von apply_theme gesetzt)
 
 
 # ------------------------------------------------------------- Uebersetzung
 STRINGS = {
     "de": {
-        "subtitle": "¼ Auflösung · Unterordner „Proxy“",
+        "subtitle": "1:4 · 1:2 · 1:1 · Unterordner „Proxy“",
         "codec_label": "Codec:",
         "codec_h264": "H.264 (leicht abspielbar)",
         "min_label": "Mindestauflösung:",
@@ -137,8 +145,8 @@ STRINGS = {
         "width": "Breite ",
         "height": "Höhe ",
         "hint": (
-            "Proxies werden auf ein Viertel der Originalauflösung verkleinert, "
-            "aber nie unter diese Werte. Breite und Höhe gelten dabei "
+            "Proxies werden auf die eingestellte Größe verkleinert (1:4, 1:2 "
+            "oder 1:1), aber nie unter diese Werte. Breite und Höhe gelten dabei "
             "unabhängig voneinander als Untergrenze: Das Seitenverhältnis des "
             "Originals bleibt immer erhalten, egal ob 16:9, Cinemascope, 4:3 "
             "oder Hochformat. Beispiel bei 960 × 540: Ein 2,39:1-Clip wird "
@@ -191,6 +199,14 @@ STRINGS = {
             "Standardformat ist <b>Apple ProRes 422 Proxy</b>; alternativ "
             "Avid DNxHR LB, GoPro CineForm oder ein leicht abspielbares H.264."
         ),
+        "about_formats": (
+            "<b>Unterstützte Quellformate:</b><br>"
+            "• RED <b>R3D</b> (über REDline, falls installiert)<br>"
+            "• Blackmagic <b>BRAW</b><br>"
+            "• Apple <b>ProRes RAW</b> mit automatischem Weißabgleich<br>"
+            "• alles, was FFmpeg lesen kann – z. B. Sony XAVC, H.264/H.265, "
+            "ProRes, DNx"
+        ),
         "about_author": "Geschrieben von Claude (KI von Anthropic) "
                         "in Zusammenarbeit mit STEEPTWO.",
         "about_contact": "Kontakt",
@@ -202,6 +218,95 @@ STRINGS = {
         "about_thirdparty": "Enthält FFmpeg (ffmpeg.org, GPL) und "
                             "Qt for Python (LGPL).",
         "about_close": "Schließen",
+        "update_auto": "Automatisch nach Updates suchen",
+        "update_now": "Jetzt prüfen",
+        "update_checking": "Suche …",
+        "update_current": "Proxy Maker ist auf dem neuesten Stand.",
+        "update_failed": "Prüfung nicht möglich (keine Verbindung?).",
+        "update_title": "Update verfügbar",
+        "update_question": "Neue Version verfügbar. Jetzt herunterladen?\n\n"
+                           "Installiert: {cur}\nNeu: {new}",
+        "update_yes": "Herunterladen",
+        "update_no": "Später",
+        "settings_tip": "Einstellungen",
+        "settings_title": "Einstellungen",
+        "set_codec": "Standardformat",
+        "set_codec_hint": "Gilt für neu hinzugefügte Dateien. In der Warteschlange "
+                          "lässt sich jede Datei weiterhin einzeln umstellen.",
+        "set_dest": "Speicherort der Proxies",
+        "set_dest_beside": "Neben den Quelldateien (Ordner „Proxy“)",
+        "set_dest_central": "Alles an einem Ort:",
+        "set_dest_info": "• Neben den Quelldateien: Die Proxies landen im Unterordner "
+                         "„Proxy“ – DaVinci Resolve verknüpft sie beim Import "
+                         "automatisch.\n• Alles an einem Ort: Alle Proxies kommen in "
+                         "einen Ordner, die Ordnerstruktur der Quellen wird dort "
+                         "nachgebaut. Verknüpfen in Resolve mit „Link Proxy Media…“, "
+                         "in Premiere mit „Proxy → Attach Proxies…“.",
+        "set_dest_hint": "Verknüpfen: Resolve „Link Proxy Media…“ · "
+                         "Premiere „Proxy → Attach Proxies…“",
+        "set_dest_locked": "Während des Renderns nicht änderbar.",
+        "set_browse": "Auswählen…",
+        "set_watch": "Überwachte Ordner",
+        "set_watch_on": "Diese Ordner überwachen",
+        "set_watch_hint": "Wird alle 10 Sekunden geprüft, inklusive Unterordner. "
+                          "Dateien kommen erst dazu, wenn sie 30 Sekunden lang "
+                          "unverändert waren (fertig kopiert). Ändert sich eine Datei "
+                          "danach noch, wird ihr Proxy neu erstellt. Nur solange "
+                          "Proxy Maker geöffnet ist.",
+        "set_add": "Hinzufügen…",
+        "set_remove": "Entfernen",
+        "set_power": "Beim Rendern",
+        "set_awake": "Computer wach halten",
+        "set_power_info": "• Computer wach halten: verhindert den Energiesparmodus, "
+                          "solange gerendert wird (der Bildschirm darf trotzdem "
+                          "ausgehen).\n• Wenn fertig: Energiesparmodus oder "
+                          "Herunterfahren nach einem 60-Sekunden-Countdown, der sich "
+                          "abbrechen lässt. Gilt nur für diese Sitzung und ist nicht "
+                          "verfügbar, solange Ordner überwacht werden.",
+        "set_update_auto": "Automatisch prüfen",
+        "set_update_info": "Beim Start fragt Proxy Maker bei GitHub nach, ob es eine "
+                           "neuere Version gibt, und bietet dann die Download-Seite "
+                           "an. Es wird nichts automatisch heruntergeladen.",
+        "set_after": "Wenn fertig:",
+        "after_none": "Nichts tun",
+        "after_sleep": "Energiesparmodus",
+        "after_shutdown": "Herunterfahren",
+        "set_after_hint": "Gilt nur für diese Sitzung. Nicht verfügbar, solange "
+                          "Ordner überwacht werden.",
+        "set_updates": "Updates",
+        "watching": "Überwache {n} Ordner",
+        "watching_missing": "Überwache {n} Ordner · {m} nicht erreichbar",
+        "watch_unreachable": "Nicht erreichbar:",
+        "watch_reachable": "Werden überwacht:",
+        "watch_lost": "Überwachter Ordner nicht erreichbar: {path}",
+        "watch_back": "Überwachter Ordner wieder erreichbar: {path}",
+        "watch_added": "Überwachter Ordner: {n} neue Datei(en) hinzugefügt.",
+        "watch_redo": "Quelldatei hat sich geändert – Proxy wird neu erstellt",
+        "watch_tip": "So funktioniert die Ordnerüberwachung:\n"
+                     "• Alle 10 Sekunden wird nach neuen Dateien gesucht "
+                     "(inklusive Unterordner).\n"
+                     "• Eine neue Datei kommt erst in die Warteschlange, wenn sie "
+                     "30 Sekunden lang unverändert war – so werden Dateien, die "
+                     "noch kopiert werden, nicht zu früh verarbeitet.\n"
+                     "• Ändert sich eine Datei danach noch (z.B. weil ein Kopiervorgang "
+                     "pausiert hatte), wird ihr Proxy gelöscht und neu erstellt.\n"
+                     "• Bereits vorhandene Proxies werden nie angefasst.\n"
+                     "• Nur solange Proxy Maker geöffnet ist.",
+        "disk_checking": "Prüfe Speicherplatz …",
+        "disk_title": "Zu wenig Speicherplatz?",
+        "disk_question": "Die Proxies brauchen voraussichtlich mehr Platz, als frei "
+                         "ist:\n\n{lines}\n\nDas ist eine Schätzung. Trotzdem starten?",
+        "disk_line": "{loc}: benötigt ca. {need}, frei {free}",
+        "disk_start": "Trotzdem starten",
+        "disk_cancel": "Abbrechen",
+        "disk_not_started": "Nicht gestartet – zu wenig Speicherplatz: {lines}",
+        "disk_full": "Zu wenig Speicherplatz am Ziel",
+        "after_title": "Rendern abgeschlossen",
+        "after_sleep_in": "Der Computer wechselt in {s} s in den Energiesparmodus.",
+        "after_shutdown_in": "Der Computer fährt in {s} s herunter.",
+        "after_now": "Jetzt",
+        "after_abort": "Abbrechen",
+        "after_failed": "Energiesparmodus/Herunterfahren fehlgeschlagen: {err}",
         "queue_title": "Warteschlange",
         "queue_empty": "Noch leer – Dateien oder Ordner links hineinziehen",
         "btn_start": "▶  Start",
@@ -215,12 +320,23 @@ STRINGS = {
         "idle": "Bereit",
         "empty_hint": "Dateien oder Ordner hineinziehen",
         "or": "oder",
-        "info_tip": "Proxies werden in ¼ Auflösung gerendert, aber nie kleiner als "
-                    "die Mindestauflösung – Breite und Höhe gelten einzeln. Das "
-                    "Seitenverhältnis bleibt immer erhalten, kleineres Material "
-                    "wird nicht hochskaliert.\n\nCodec und Mindestauflösung gelten "
-                    "für alle Dateien, die danach hinzugefügt werden. Den Codec "
-                    "kann man pro Datei in der Liste noch ändern.",
+        "info_tip": "Proxies werden in {scale} gerendert (änderbar in den "
+                    "Einstellungen ⚙), aber nie kleiner als die Mindestauflösung – "
+                    "Breite und Höhe gelten einzeln. Das Seitenverhältnis bleibt "
+                    "immer erhalten, kleineres Material wird nicht hochskaliert.\n\n"
+                    "Die Mindestauflösung gilt für alle Dateien, die danach "
+                    "hinzugefügt werden. Das Format kann man pro Datei in der "
+                    "Liste noch ändern.",
+        "scale_4": "Viertelauflösung (1:4)",
+        "scale_2": "halber Auflösung (1:2)",
+        "scale_1": "voller Auflösung (1:1)",
+        "set_scale": "Proxy-Größe",
+        "set_scale_4": "1:4 – Viertelauflösung (Standard)",
+        "set_scale_2": "1:2 – halbe Auflösung",
+        "set_scale_1": "1:1 – volle Auflösung (keine Verkleinerung)",
+        "set_scale_hint": "Gilt ab dem nächsten Renderstart für alle Dateien. Die "
+                          "Mindestauflösung im Hauptfenster gilt weiterhin; bei 1:1 "
+                          "hat sie keine Wirkung.",
         "add_tip": "Dateien oder Ordner hinzufügen",
         "add_files": "Dateien …",
         "add_dir": "Ordner …",
@@ -250,7 +366,7 @@ STRINGS = {
         "g_net": "Netz",
     },
     "en": {
-        "subtitle": "¼ resolution · “Proxy” subfolder",
+        "subtitle": "1:4 · 1:2 · 1:1 · “Proxy” subfolder",
         "codec_label": "Codec:",
         "codec_h264": "H.264 (easy playback)",
         "min_label": "Minimum resolution:",
@@ -258,7 +374,7 @@ STRINGS = {
         "width": "Width ",
         "height": "Height ",
         "hint": (
-            "Proxies are scaled down to a quarter of the source resolution, "
+            "Proxies are scaled down to the chosen size (1:4, 1:2 or 1:1), "
             "but never below these values. Width and height are each treated "
             "as a separate lower limit, so the source aspect ratio is always "
             "preserved – 16:9, scope, 4:3 or vertical alike. Example at "
@@ -309,6 +425,14 @@ STRINGS = {
             "Default output is <b>Apple ProRes 422 Proxy</b>; alternatively "
             "Avid DNxHR LB, GoPro CineForm or an easy-to-play H.264."
         ),
+        "about_formats": (
+            "<b>Supported source formats:</b><br>"
+            "• RED <b>R3D</b> (via REDline, if installed)<br>"
+            "• Blackmagic <b>BRAW</b><br>"
+            "• Apple <b>ProRes RAW</b> with automatic white balance<br>"
+            "• everything FFmpeg can read – e.g. Sony XAVC, H.264/H.265, "
+            "ProRes, DNx"
+        ),
         "about_author": "Written by Claude (AI by Anthropic) "
                         "in collaboration with STEEPTWO.",
         "about_contact": "Contact",
@@ -320,6 +444,93 @@ STRINGS = {
         "about_thirdparty": "Includes FFmpeg (ffmpeg.org, GPL) and "
                             "Qt for Python (LGPL).",
         "about_close": "Close",
+        "update_auto": "Check for updates automatically",
+        "update_now": "Check now",
+        "update_checking": "Checking …",
+        "update_current": "Proxy Maker is up to date.",
+        "update_failed": "Could not check (no connection?).",
+        "update_title": "Update available",
+        "update_question": "New version available. Do you want to download?\n\n"
+                           "Installed: {cur}\nNew: {new}",
+        "update_yes": "Download",
+        "update_no": "Later",
+        "settings_tip": "Settings",
+        "settings_title": "Settings",
+        "set_codec": "Default format",
+        "set_codec_hint": "Used for newly added files. Each file in the queue can "
+                          "still be changed individually.",
+        "set_dest": "Proxy location",
+        "set_dest_beside": "Next to the source files (“Proxy” folder)",
+        "set_dest_central": "All in one location:",
+        "set_dest_info": "• Next to the source files: proxies go into a “Proxy” "
+                         "subfolder – DaVinci Resolve links them automatically on "
+                         "import.\n• All in one location: all proxies go into one "
+                         "folder, with the source folder structure recreated there. "
+                         "To link: Resolve “Link Proxy Media…”, Premiere “Proxy → "
+                         "Attach Proxies…”.",
+        "set_dest_hint": "To link: Resolve “Link Proxy Media…” · "
+                         "Premiere “Proxy → Attach Proxies…”",
+        "set_dest_locked": "Can't be changed while rendering.",
+        "set_browse": "Choose…",
+        "set_watch": "Watch folders",
+        "set_watch_on": "Watch these folders",
+        "set_watch_hint": "Checked every 10 seconds, including subfolders. Files are "
+                          "only added once they have been unchanged for 30 seconds "
+                          "(finished copying). If a file still changes afterwards, "
+                          "its proxy is re-created. Only while Proxy Maker is open.",
+        "set_add": "Add…",
+        "set_remove": "Remove",
+        "set_power": "While rendering",
+        "set_awake": "Keep computer awake",
+        "set_power_info": "• Keep computer awake: prevents sleep while rendering "
+                          "(the screen may still turn off).\n• When finished: sleep "
+                          "or shut down after a 60-second countdown that can be "
+                          "cancelled. Applies to this session only and isn't "
+                          "available while watch folders are active.",
+        "set_update_auto": "Check automatically",
+        "set_update_info": "At startup Proxy Maker asks GitHub whether a newer "
+                           "version exists and then offers the download page. "
+                           "Nothing is downloaded automatically.",
+        "set_after": "When finished:",
+        "after_none": "Do nothing",
+        "after_sleep": "Sleep",
+        "after_shutdown": "Shut down",
+        "set_after_hint": "Applies to this session only. Not available while "
+                          "watch folders are active.",
+        "set_updates": "Updates",
+        "watching": "Watching {n} folder(s)",
+        "watching_missing": "Watching {n} folder(s) · {m} not reachable",
+        "watch_unreachable": "Not reachable:",
+        "watch_reachable": "Being watched:",
+        "watch_lost": "Watch folder not reachable: {path}",
+        "watch_back": "Watch folder reachable again: {path}",
+        "watch_added": "Watch folder: {n} new file(s) added.",
+        "watch_redo": "source file changed – proxy will be re-created",
+        "watch_tip": "How watch folders work:\n"
+                     "• Every 10 seconds the folders are checked for new files "
+                     "(including subfolders).\n"
+                     "• A new file is only queued once it has been unchanged for "
+                     "30 seconds – so files that are still being copied aren't "
+                     "processed too early.\n"
+                     "• If a file still changes afterwards (e.g. a paused copy "
+                     "resumed), its proxy is deleted and re-created.\n"
+                     "• Proxies that already existed are never touched.\n"
+                     "• Only while Proxy Maker is open.",
+        "disk_checking": "Checking disk space …",
+        "disk_title": "Not enough disk space?",
+        "disk_question": "The proxies will probably need more space than is "
+                         "free:\n\n{lines}\n\nThis is an estimate. Start anyway?",
+        "disk_line": "{loc}: needs about {need}, free {free}",
+        "disk_start": "Start anyway",
+        "disk_cancel": "Cancel",
+        "disk_not_started": "Not started – not enough disk space: {lines}",
+        "disk_full": "Not enough disk space at the destination",
+        "after_title": "Rendering finished",
+        "after_sleep_in": "The computer will go to sleep in {s} s.",
+        "after_shutdown_in": "The computer will shut down in {s} s.",
+        "after_now": "Now",
+        "after_abort": "Cancel",
+        "after_failed": "Sleep/shut down failed: {err}",
         "queue_title": "Queue",
         "queue_empty": "Empty – drop files or folders on the left",
         "btn_start": "▶  Start",
@@ -333,12 +544,22 @@ STRINGS = {
         "idle": "Ready",
         "empty_hint": "Drop files or folders here",
         "or": "or",
-        "info_tip": "Proxies are rendered at ¼ resolution, but never smaller than "
-                    "the minimum resolution – width and height count separately. "
-                    "The aspect ratio is always preserved and smaller footage is "
-                    "never upscaled.\n\nCodec and minimum resolution apply to all "
-                    "files added afterwards. The codec can still be changed per "
-                    "file in the list.",
+        "info_tip": "Proxies are rendered at {scale} (change in Settings ⚙), but "
+                    "never smaller than the minimum resolution – width and height "
+                    "count separately. The aspect ratio is always preserved and "
+                    "smaller footage is never upscaled.\n\nThe minimum resolution "
+                    "applies to all files added afterwards. The format can still "
+                    "be changed per file in the list.",
+        "scale_4": "quarter resolution (1:4)",
+        "scale_2": "half resolution (1:2)",
+        "scale_1": "full resolution (1:1)",
+        "set_scale": "Proxy size",
+        "set_scale_4": "1:4 – quarter resolution (default)",
+        "set_scale_2": "1:2 – half resolution",
+        "set_scale_1": "1:1 – full resolution (no downscaling)",
+        "set_scale_hint": "Applies to all files from the next render start. The "
+                          "minimum resolution in the main window still applies; "
+                          "at 1:1 it has no effect.",
         "add_tip": "Add files or folders",
         "add_files": "Files …",
         "add_dir": "Folder …",
@@ -386,6 +607,65 @@ def settings() -> QSettings:
 
 def asset(name: str) -> Path:
     return ROOT / "assets" / name
+
+
+def setting_bool(key: str, default: bool) -> bool:
+    v = settings().value(key, "true" if default else "false")
+    return str(v).lower() in ("true", "1")
+
+
+def set_setting_bool(key: str, on: bool) -> None:
+    settings().setValue(key, "true" if on else "false")
+
+
+def updates_enabled() -> bool:
+    return setting_bool("check_updates", True)
+
+
+def watch_dirs() -> list[str]:
+    import json
+    try:
+        val = json.loads(str(settings().value("watch_dirs", "[]")))
+        return [str(d) for d in val] if isinstance(val, list) else []
+    except ValueError:
+        return []
+
+
+def set_watch_dirs(dirs: list[str]) -> None:
+    import json
+    settings().setValue("watch_dirs", json.dumps(dirs))
+
+
+def scale_setting() -> int:
+    """Proxy-Groesse als Teiler: 4 = 1:4, 2 = 1:2, 1 = 1:1."""
+    try:
+        v = int(settings().value("scale", core.DEFAULT_SCALE))
+    except (TypeError, ValueError):
+        v = core.DEFAULT_SCALE
+    return v if v in core.SCALES else core.DEFAULT_SCALE
+
+
+def output_root() -> str | None:
+    """None = Proxy-Ordner neben der Quelle."""
+    if str(settings().value("out_mode", "beside")) != "central":
+        return None
+    root = str(settings().value("out_root", "") or "")
+    return root or None
+
+
+def ask_update(parent, tag: str, url: str) -> bool:
+    """Asks whether to download the new version; opens its release page on yes."""
+    box = QMessageBox(QMessageBox.Question, tr("update_title"),
+                      tr("update_question", cur=APP_VERSION, new=tag.lstrip("vV")),
+                      parent=parent)
+    yes = box.addButton(tr("update_yes"), QMessageBox.AcceptRole)
+    box.addButton(tr("update_no"), QMessageBox.RejectRole)
+    box.setDefaultButton(yes)
+    box.exec()
+    if box.clickedButton() is yes:
+        QDesktopServices.openUrl(QUrl(url))
+        return True
+    return False
 
 
 def wrap_tip(text: str) -> str:
@@ -588,6 +868,8 @@ class Worker(QThread):
                 if self.cancel.is_set():
                     raise core.Cancelled()
         try:
+            if diskcheck.nearly_full(dst):  # Notbremse, auch fuer spaeter Hinzugefuegtes
+                raise RuntimeError(tr("disk_full"))
             try:
                 ok = enc(src, min_size, codec, progress, False)
             except core.Cancelled:
@@ -942,6 +1224,71 @@ class InfoIcon(QLabel):
         self.popup.hide()
 
 
+class PulseDot(QWidget):
+    """Statuspunkt der Ordnerueberwachung: gruen mit pulsierender Aura, solange
+    ueberwacht wird; bernsteinfarben und ruhig, wenn ein Ordner nicht
+    erreichbar ist."""
+
+    SIZE = 18          # Widget inkl. Aura (px)
+    CORE = 3.5         # Radius des Punkts
+    PERIOD_MS = 2000   # ein Atemzug
+    TICK_MS = 50       # ~20 Bilder/s - nur dieses kleine Rechteck wird neu gezeichnet
+    GREEN = QColor("#3ddc84")
+    AMBER = QColor("#f5a524")
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self.warn = False
+        self._t = 0
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+
+    def set_warn(self, warn: bool):
+        self.warn = warn
+        self._sync()
+        self.update()
+
+    def showEvent(self, e):
+        self._sync()
+        super().showEvent(e)
+
+    def hideEvent(self, e):
+        self._timer.stop()  # unsichtbar -> keine Rechenzeit
+        super().hideEvent(e)
+
+    def _sync(self):
+        if self.isVisible() and not self.warn:
+            if not self._timer.isActive():
+                self._timer.start(self.TICK_MS)
+        else:
+            self._timer.stop()
+
+    def _tick(self):
+        self._t = (self._t + self.TICK_MS) % self.PERIOD_MS
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        c = QPointF(self.width() / 2, self.height() / 2)
+        color = QColor(self.AMBER if self.warn else self.GREEN)
+        if not self.warn:
+            # Aura: waechst nach aussen und blendet dabei aus
+            ph = self._t / self.PERIOD_MS
+            r = self.CORE + ph * (self.SIZE / 2 - self.CORE - 0.5)
+            aura = QColor(color)
+            aura.setAlphaF(0.75 * (1 - ph) ** 1.5)
+            p.setPen(Qt.NoPen)
+            p.setBrush(aura)
+            p.drawEllipse(c, r, r)
+        # duenner dunkler Rand, damit der Punkt auch auf dem Regenbogen sichtbar ist
+        p.setPen(QPen(QColor(0, 0, 0, 110), 1.0))
+        p.setBrush(color)
+        p.drawEllipse(c, self.CORE, self.CORE)
+        p.end()
+
+
 class StatusBar(QFrame):
     """Statuszeile, deren Hintergrund sich als Gesamtfortschritt fuellt."""
 
@@ -1141,6 +1488,7 @@ class AboutDialog(QDialog):
             return lab
 
         para(tr("about_body"))
+        para(tr("about_formats"))
         para(tr("about_author"))
         para(f"<b>{tr('about_contact')}:</b> "
              f"<a href='mailto:{CONTACT}' style='color:{ACCENT}'>{CONTACT}</a>")
@@ -1154,6 +1502,293 @@ class AboutDialog(QDialog):
         close.setDefault(True)
         row.addWidget(close)
         lay.addLayout(row)
+
+
+class DiskCheck(QThread):
+    """Schaetzt im Hintergrund den Platzbedarf (probt dafuer jede Datei)."""
+    result = Signal(list)  # [diskcheck.Shortage]
+
+    def __init__(self, ffmpeg: str, items, parent=None):
+        super().__init__(parent)
+        self.ffmpeg, self.items = ffmpeg, list(items)
+        self._cancel = threading.Event()
+
+    def stop(self):
+        self._cancel.set()
+
+    def run(self):
+        try:
+            res = diskcheck.check(self.ffmpeg, self.items, self._cancel.is_set)
+        except Exception:
+            res = []  # Pruefung ist nur ein Hinweis - nie das Starten blockieren
+        self.result.emit(res)
+
+
+class SettingsDialog(QDialog):
+    """Einstellungen: Standardformat, Speicherort, Ueberwachte Ordner,
+    Energie und Updates. Aenderungen gelten sofort."""
+
+    def __init__(self, main: "MainWindow"):
+        super().__init__(main)
+        self.main = main
+        self.setObjectName("settings")
+        self.setWindowTitle(tr("settings_title"))
+        self.setModal(True)
+        self.setMinimumWidth(540)
+        # Inhalt scrollt, falls der Bildschirm kleiner ist als das Fenster
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body = QWidget()
+        body.setObjectName("setBody")
+        scroll.setWidget(body)
+        outer.addWidget(scroll, 1)
+        lay = QVBoxLayout(body)
+        lay.setContentsMargins(22, 14, 22, 10)
+        lay.setSpacing(8)
+        st = settings()
+
+        busy = main.busy()
+
+        def heading(key: str, info: str | None = None):
+            """Ueberschrift + ⓘ: die Erklaerung steht im Info-Fenster, nicht im Dialog."""
+            row = QHBoxLayout()
+            row.setSpacing(4)
+            row.setContentsMargins(0, 8, 0, 0)
+            lab = QLabel(tr(key))
+            lab.setObjectName("setHead")
+            row.addWidget(lab)
+            if info:
+                icon = InfoIcon()
+                icon.set_text(info)
+                row.addWidget(icon)
+            row.addStretch()
+            lay.addLayout(row)
+
+        def note(text: str) -> QLabel:
+            """Nur fuer kurze Statusmeldungen, die gerade relevant sind."""
+            lab = QLabel(text)
+            lab.setObjectName("aboutSmall")
+            lab.setWordWrap(True)
+            lay.addWidget(lab)
+            return lab
+
+        # ---- Standardformat
+        heading("set_codec", tr("set_codec_hint"))
+        self.codec = QComboBox()
+        for key, name in CODEC_NAMES.items():
+            self.codec.addItem(tr("codec_h264") if key == "h264" else name, key)
+        self.codec.setCurrentIndex(max(0, self.codec.findData(main.codec())))
+        self.codec.currentIndexChanged.connect(
+            lambda i: settings().setValue("codec", self.codec.itemData(i)))
+        lay.addWidget(self.codec)
+
+        # ---- Proxy-Groesse
+        heading("set_scale", tr("set_scale_hint"))
+        self.scale = QComboBox()
+        for d in core.SCALES:
+            self.scale.addItem(tr(f"set_scale_{d}"), d)
+        self.scale.setCurrentIndex(max(0, self.scale.findData(scale_setting())))
+        self.scale.currentIndexChanged.connect(self._scale_changed)
+        self.scale.setEnabled(not busy)
+        lay.addWidget(self.scale)
+
+        # ---- Speicherort
+        heading("set_dest", tr("set_dest_info"))
+        self.r_beside = QRadioButton(tr("set_dest_beside"))
+        self.r_central = QRadioButton(tr("set_dest_central"))
+        grp = QButtonGroup(self)
+        grp.addButton(self.r_beside)
+        grp.addButton(self.r_central)
+        lay.addWidget(self.r_beside)
+        drow = QHBoxLayout()
+        self.root_edit = QLineEdit(str(st.value("out_root", "") or ""))
+        self.root_edit.setReadOnly(True)
+        self.b_root = QPushButton(tr("set_browse"))
+        self.b_root.clicked.connect(self._pick_root)
+        drow.addWidget(self.r_central)
+        drow.addWidget(self.root_edit, 1)
+        drow.addWidget(self.b_root)
+        lay.addLayout(drow)
+        central = output_root() is not None
+        (self.r_central if central else self.r_beside).setChecked(True)
+        self.r_central.toggled.connect(self._dest_changed)
+        for w in (self.r_beside, self.r_central, self.b_root):
+            w.setEnabled(not busy)
+        if busy:  # Groesse und Speicherort sind waehrend des Renderns gesperrt
+            note(tr("set_dest_locked"))
+        self._sync_dest()
+
+        # ---- Ueberwachte Ordner
+        heading("set_watch", tr("watch_tip"))
+        self.watch_on = QCheckBox(tr("set_watch_on"))
+        self.watch_on.setChecked(setting_bool("watch_on", False))
+        self.watch_on.toggled.connect(self._watch_toggled)
+        lay.addWidget(self.watch_on)
+        wrow = QHBoxLayout()
+        self.watch_list = QListWidget()
+        self.watch_list.setObjectName("watchList")
+        self.watch_list.setFixedHeight(64)
+        self.watch_list.addItems(watch_dirs())
+        wrow.addWidget(self.watch_list, 1)
+        wbtns = QVBoxLayout()
+        wbtns.setSpacing(6)
+        b_add = QPushButton(tr("set_add"))
+        b_add.clicked.connect(self._add_watch)
+        b_rem = QPushButton(tr("set_remove"))
+        b_rem.clicked.connect(self._remove_watch)
+        wbtns.addWidget(b_add)
+        wbtns.addWidget(b_rem)
+        wbtns.addStretch()
+        wrow.addLayout(wbtns)
+        lay.addLayout(wrow)
+
+        # ---- Energie
+        heading("set_power", tr("set_power_info"))
+        arow = QHBoxLayout()
+        self.awake = QCheckBox(tr("set_awake"))
+        self.awake.setChecked(setting_bool("keep_awake", True))
+        self.awake.toggled.connect(self._awake_toggled)
+        arow.addWidget(self.awake)
+        arow.addSpacing(24)
+        arow.addWidget(QLabel(tr("set_after")))
+        self.after = QComboBox()
+        for key in ("none", "sleep", "shutdown"):
+            self.after.addItem(tr("after_" + key), key)
+        self.after.setCurrentIndex(max(0, self.after.findData(main.after_action)))
+        self.after.currentIndexChanged.connect(self._after_changed)
+        arow.addWidget(self.after)
+        arow.addStretch()
+        lay.addLayout(arow)
+        self._sync_after()
+
+        # ---- Updates
+        heading("set_updates", tr("set_update_info"))
+        urow = QHBoxLayout()
+        self.auto = QCheckBox(tr("set_update_auto"))
+        self.auto.setChecked(updates_enabled())
+        self.auto.toggled.connect(lambda on: set_setting_bool("check_updates", on))
+        urow.addWidget(self.auto)
+        urow.addSpacing(24)
+        self.check_btn = QPushButton(tr("update_now"))
+        self.check_btn.clicked.connect(self._check_now)
+        self.update_state = QLabel("")
+        self.update_state.setObjectName("aboutSmall")
+        urow.addWidget(self.check_btn)
+        urow.addWidget(self.update_state, 1)
+        lay.addLayout(urow)
+        self._checker = None
+
+        # Schliessen-Knopf bleibt unten sichtbar, auch wenn der Inhalt scrollt
+        row = QHBoxLayout()
+        row.setContentsMargins(22, 8, 22, 14)
+        row.addStretch()
+        close = QPushButton(tr("about_close"))
+        close.clicked.connect(self.accept)
+        close.setDefault(True)
+        row.addWidget(close)
+        outer.addLayout(row)
+
+        # hoechstens 90 % der Bildschirmhoehe
+        screen = QGuiApplication.primaryScreen()
+        want = body.sizeHint().height() + 60
+        if screen:
+            want = min(want, int(screen.availableGeometry().height() * 0.9))
+        self.resize(max(self.minimumWidth(), body.sizeHint().width() + 20), want)
+
+    # ---- Proxy-Groesse
+    def _scale_changed(self, i: int):
+        settings().setValue("scale", int(self.scale.itemData(i)))
+        self.main.apply_scale()
+
+    # ---- Speicherort
+    def _sync_dest(self):
+        central = self.r_central.isChecked()
+        self.root_edit.setEnabled(central)
+        self.b_root.setEnabled(central and not self.main.busy())
+
+    def _pick_root(self) -> bool:
+        d = QFileDialog.getExistingDirectory(self, tr("set_dest_central"),
+                                             self.root_edit.text())
+        if not d:
+            return False
+        d = str(Path(d))  # Windows: E:\Proxies statt E:/Proxies
+        self.root_edit.setText(d)
+        settings().setValue("out_root", d)
+        self.main.apply_output()
+        return True
+
+    def _dest_changed(self, central: bool):
+        if central and not self.root_edit.text() and not self._pick_root():
+            self.r_beside.setChecked(True)  # kein Ordner gewaehlt -> zurueck
+            return
+        settings().setValue("out_mode", "central" if central else "beside")
+        self._sync_dest()
+        self.main.apply_output()
+
+    # ---- Ueberwachte Ordner
+    def _dirs(self) -> list[str]:
+        return [self.watch_list.item(i).text() for i in range(self.watch_list.count())]
+
+    def _add_watch(self):
+        d = QFileDialog.getExistingDirectory(self, tr("set_watch"))
+        d = str(Path(d)) if d else ""
+        if d and d not in self._dirs():
+            self.watch_list.addItem(d)
+            set_watch_dirs(self._dirs())
+            self.main.apply_watch()
+
+    def _remove_watch(self):
+        for it in self.watch_list.selectedItems():
+            self.watch_list.takeItem(self.watch_list.row(it))
+        set_watch_dirs(self._dirs())
+        self.main.apply_watch()
+
+    def _watch_toggled(self, on: bool):
+        set_setting_bool("watch_on", on)
+        self.main.apply_watch()
+        self._sync_after()
+
+    # ---- Energie
+    def _awake_toggled(self, on: bool):
+        set_setting_bool("keep_awake", on)
+        self.main.apply_keep_awake()
+
+    def _after_changed(self, i: int):
+        self.main.after_action = self.after.itemData(i)
+
+    def _sync_after(self):
+        watching = self.main.watching()
+        if watching:
+            self.after.setCurrentIndex(0)
+        self.after.setEnabled(not watching)
+
+    # ---- Updates
+    def _check_now(self):
+        self.check_btn.setEnabled(False)
+        self.update_state.setText(tr("update_checking"))
+        self._checker = updater.UpdateChecker(APP_VERSION, self)
+        self._checker.result.connect(self._checked)
+        self._checker.start()
+
+    def _checked(self, ok: bool, newer: bool, tag: str, url: str):
+        self.check_btn.setEnabled(True)
+        if not ok:
+            self.update_state.setText(tr("update_failed"))
+        elif newer:
+            self.update_state.setText("")
+            ask_update(self, tag, url)
+        else:
+            self.update_state.setText(tr("update_current"))
+
+    def done(self, r):
+        if self._checker and self._checker.isRunning():
+            self._checker.wait(8000)  # Thread nicht mitten im Request zerstoeren
+        super().done(r)
 
 
 def system_language() -> str:
@@ -1170,6 +1805,12 @@ class MainWindow(QMainWindow):
         self.ffmpeg = core.find_ffmpeg()
         self.redline_path: str | None = None
         self.worker: Worker | None = None
+        self.keep_awake = power.KeepAwake()
+        self.after_action = "none"  # nur fuer diese Sitzung: none/sleep/shutdown
+        self.watcher: watch.FolderWatcher | None = None
+        self._disk: DiskCheck | None = None
+        self._checking = False      # Speicherplatz wird gerade geprueft
+        self._redo: set[str] = set()  # Quelle aenderte sich waehrend des Renderns
         self.rows: dict[str, tuple[QListWidgetItem, QueueRow]] = {}
         self._current: str | None = None
         self._fracs: dict[str, float] = {}  # laufende Dateien -> Fortschritt
@@ -1213,6 +1854,12 @@ class MainWindow(QMainWindow):
         self.b_lang.setCursor(Qt.PointingHandCursor)
         self.b_lang.clicked.connect(self.toggle_language)
         head.addWidget(self.b_lang)
+        self.b_settings = QPushButton("⚙")
+        self.b_settings.setObjectName("icon")
+        self.b_settings.setFixedSize(28, 28)
+        self.b_settings.setCursor(Qt.PointingHandCursor)
+        self.b_settings.clicked.connect(lambda: SettingsDialog(self).exec())
+        head.addWidget(self.b_settings)
         self.b_help = QPushButton("?")
         self.b_help.setObjectName("icon")
         self.b_help.setFixedSize(28, 28)
@@ -1220,14 +1867,19 @@ class MainWindow(QMainWindow):
         self.b_help.clicked.connect(lambda: AboutDialog(self).exec())
         head.addWidget(self.b_help)
         lay.addLayout(head)
+        # Schlagschatten fuer die Kopf-Icons (Deckkraft je Theme, siehe apply_theme)
+        self._icon_shadows = []
+        for b in (self.b_theme, self.b_lang, self.b_settings, self.b_help):
+            fx = QGraphicsDropShadowEffect(b)
+            fx.setBlurRadius(12)
+            fx.setOffset(0, 1.5)
+            fx.setColor(QColor(0, 0, 0, 190))
+            b.setGraphicsEffect(fx)
+            self._icon_shadows.append(fx)
 
         # ---- eine schlanke Optionszeile
         row = QHBoxLayout()
         row.setSpacing(8)
-        self.codec_combo = QComboBox()
-        for key, name in CODEC_NAMES.items():
-            self.codec_combo.addItem(name, key)
-        row.addWidget(self.codec_combo)
         self.min_combo = QComboBox()
         for w, h in MIN_PRESETS:
             self.min_combo.addItem(f"min {w} × {h}", (w, h))
@@ -1298,6 +1950,14 @@ class MainWindow(QMainWindow):
         self.footer.setTextFormat(Qt.PlainText)
         self.footer.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         st_row.addWidget(self.footer, 1)
+        self.watch_dot = PulseDot()
+        self.watch_dot.hide()
+        st_row.addWidget(self.watch_dot)
+        self.watch_label = QLabel()
+        self.watch_label.setObjectName("footer")
+        self.watch_label.hide()
+        st_row.addWidget(self.watch_label)
+        self._watch_missing: list[str] = []  # ueberwachte Ordner, die fehlen
         self.total_label = QLabel()
         self.total_label.setObjectName("footer")
         st_row.addWidget(self.total_label)
@@ -1341,10 +2001,6 @@ class MainWindow(QMainWindow):
         LANG = system_language()  # Start in Systemsprache, Flagge nur pro Sitzung
         self.custom_w.setValue(int(st.value("custom_w", 960)))
         self.custom_h.setValue(int(st.value("custom_h", 540)))
-        cidx = self.codec_combo.findData(str(st.value("codec", core.DEFAULT_CODEC)))
-        self.codec_combo.setCurrentIndex(max(0, cidx))
-        self.codec_combo.currentIndexChanged.connect(
-            lambda i: settings().setValue("codec", self.codec_combo.itemData(i)))
         idx = int(st.value("min_index", 1))  # Standard: 960 x 540
         if 0 <= idx < self.min_combo.count():
             self.min_combo.setCurrentIndex(idx)
@@ -1359,6 +2015,11 @@ class MainWindow(QMainWindow):
         self.retranslate()
         self._refresh_area()
 
+        # Update-Pruefung im Hintergrund (abschaltbar in den Einstellungen)
+        self._update_checker = None
+        if updates_enabled():
+            QTimer.singleShot(1500, self._start_update_check)
+
         if not self.ffmpeg:
             self.log(tr("ffmpeg_missing"))
             self.area.setEnabled(False)
@@ -1367,6 +2028,11 @@ class MainWindow(QMainWindow):
                                  ffmpeg=core.ffmpeg_version(self.ffmpeg))
             self.log(tr("ffmpeg_info", ver=core.APP_INFO["ffmpeg"], path=self.ffmpeg))
             self.log(tr("braw_found") if braw.find() else tr("braw_missing"))
+
+        # Speicherort, Proxy-Groesse, Ueberwachte Ordner, Energie
+        self.apply_output()
+        self.apply_scale()
+        self.apply_watch()
 
     # ---------------------------------------------------- Sprache / Theme
     def set_language(self, code: str):
@@ -1387,6 +2053,10 @@ class MainWindow(QMainWindow):
         self.theme_key = key if key in THEMES else "rainbow"
         T = THEMES[self.theme_key]
         QApplication.instance().setStyleSheet(make_style())
+        alpha, blur = T["icon_shadow"]
+        for fx in self._icon_shadows:
+            fx.setColor(QColor(0, 0, 0, alpha))
+            fx.setBlurRadius(blur)
         if save:
             settings().setValue("theme", self.theme_key)
         self.centralWidget().update()
@@ -1403,11 +2073,12 @@ class MainWindow(QMainWindow):
         self.b_theme.setIcon(theme_preview_icon(nxt))
         self.b_theme.setToolTip(f"{tr('theme_tip')} → {tr('theme_' + nxt)}")
         self.b_help.setToolTip(tr("about_tip"))
+        self.b_settings.setToolTip(tr("settings_tip"))
         self.min_combo.setItemText(self.min_combo.count() - 1, tr("custom_item"))
-        self.codec_combo.setItemText(self.codec_combo.findData("h264"), tr("codec_h264"))
+        self._update_watch_label()
         self.custom_w.setPrefix(tr("width"))
         self.custom_h.setPrefix(tr("height"))
-        self.info.set_text(tr("info_tip"))
+        self.info.set_text(tr("info_tip", scale=tr(f"scale_{scale_setting()}")))
         self.area.empty_label.setText(tr("empty_hint"))
         self.area.link_files.setText(tr("add_files"))
         self.area.link_dir.setText(tr("add_dir"))
@@ -1437,7 +2108,110 @@ class MainWindow(QMainWindow):
         return (self.custom_w.value() // 2 * 2, self.custom_h.value() // 2 * 2)
 
     def codec(self) -> str:
-        return self.codec_combo.currentData() or core.DEFAULT_CODEC
+        c = str(settings().value("codec", core.DEFAULT_CODEC))
+        return c if c in CODEC_NAMES else core.DEFAULT_CODEC
+
+    # ------------------------------------------- Speicherort / Ordner / Energie
+    def busy(self) -> bool:
+        return self.running() or self._checking
+
+    def apply_output(self):
+        if not self.busy():  # Ziel bleibt waehrend des Renderns fest
+            core.set_output_root(output_root())
+
+    def apply_scale(self):
+        if not self.busy():  # Groesse bleibt waehrend des Renderns fest
+            core.set_scale(scale_setting())
+        self.info.set_text(tr("info_tip", scale=tr(f"scale_{scale_setting()}")))
+
+    def watching(self) -> bool:
+        return setting_bool("watch_on", False) and bool(watch_dirs())
+
+    def apply_watch(self):
+        if not self.ffmpeg:
+            return
+        if self.watching():
+            if self.watcher is None:
+                self.watcher = watch.FolderWatcher(watch_dirs(), self)
+                self.watcher.found.connect(self._watch_found)
+                self.watcher.status.connect(self._watch_status)
+                self.watcher.start()
+            else:
+                self.watcher.set_folders(watch_dirs())
+            self.after_action = "none"  # wartet ja immer auf weitere Dateien
+        elif self.watcher is not None:
+            self.watcher.stop()
+            self.watcher.wait(3000)
+            self.watcher = None
+            self._watch_missing = []
+        self._update_watch_label()
+
+    def _update_watch_label(self):
+        on = self.watching()
+        self.watch_label.setVisible(on)
+        self.watch_dot.setVisible(on)
+        if not on:
+            return
+        dirs = watch_dirs()
+        missing = [d for d in self._watch_missing if d in dirs]
+        self.watch_dot.set_warn(bool(missing))
+        if missing:
+            self.watch_label.setText(tr("watching_missing", n=len(dirs), m=len(missing)))
+            head = tr("watch_unreachable") + "\n" + "\n".join(missing)
+            ok = [d for d in dirs if d not in missing]
+            if ok:
+                head += "\n\n" + tr("watch_reachable") + "\n" + "\n".join(ok)
+        else:
+            self.watch_label.setText(tr("watching", n=len(dirs)))
+            head = "\n".join(dirs)
+        tip = wrap_tip(head + "\n\n" + tr("watch_tip"))
+        self.watch_label.setToolTip(tip)
+        self.watch_dot.setToolTip(tip)
+
+    def _watch_status(self, missing: list):
+        if missing != self._watch_missing:
+            for d in missing:
+                if d not in self._watch_missing:
+                    self.log(tr("watch_lost", path=d))
+            for d in self._watch_missing:
+                if d not in missing:
+                    self.log(tr("watch_back", path=d))
+        self._watch_missing = list(missing)
+        self._update_watch_label()
+
+    def _watch_found(self, items: list):
+        fresh = []
+        for f, b, rerender in items:
+            src = Path(f)
+            if rerender:
+                # Quelle hat sich nach dem Einreihen geaendert (z.B. Kopie hatte
+                # nur pausiert): unseren Proxy verwerfen und neu rendern
+                self.log(f"{'':15}{src.name} – {tr('watch_redo')}")
+                state = self.rows[f][1].state if f in self.rows else None
+                if state == "wait":
+                    continue  # hat noch nicht angefangen - rendert ohnehin den neuen Stand
+                if state == "run":
+                    self._redo.add(f)  # nach dem Ende verwerfen und neu einreihen
+                    continue
+                self._discard_proxy(src)
+            fresh.append((src, Path(b)))
+        new = self._enqueue(fresh, quiet=True) if fresh else 0
+        if new:
+            self.log(tr("watch_added", n=new))
+            if not self.busy():
+                self.begin(auto=True)
+
+    def _discard_proxy(self, src: Path):
+        try:
+            core.proxy_path(src).unlink(missing_ok=True)
+        except OSError as exc:
+            self.log(logline("tag_err", src.name, str(exc)))
+
+    def apply_keep_awake(self):
+        if self.running() and setting_bool("keep_awake", True):
+            self.keep_awake.start()
+        else:
+            self.keep_awake.stop()
 
     def _perf_changed(self, on: bool):
         accel.set_mode("normal" if on else "low")
@@ -1496,18 +2270,28 @@ class MainWindow(QMainWindow):
     def add_paths(self, paths: list[str]):
         if not self.ffmpeg:
             return
-        files = core.collect(paths)
-        if not files:
+        found = core.collect_with_base(paths)
+        if not found:
             self.log(tr("no_files"))
             return
+        self._enqueue(found)
+
+    def _enqueue(self, found: list[tuple[Path, Path]], quiet: bool = False) -> int:
+        """Dateien (mit Basisordner) einreihen. Rueckgabe: Anzahl neuer Dateien."""
+        files = [f for f, _b in found]
         if any(core.is_r3d(f) for f in files):
             self.ensure_redline()
         ms, codec = self.min_size(), self.codec()
         active = set(self.queued_paths())
         new = [f for f in files if str(f) not in active]
         if not new:
-            self.log(tr("already_queued"))
-            return
+            if not quiet:
+                self.log(tr("already_queued"))
+            return 0
+        new_set = set(new)
+        for f, base in found:
+            if f in new_set:  # laufende Dateien behalten ihr Ziel
+                core.remember_base(f, base)
         for f in new:
             if str(f) in self.rows:  # alter fertiger/fehlerhafter Eintrag
                 self._take_row(str(f))
@@ -1519,6 +2303,7 @@ class MainWindow(QMainWindow):
         else:
             self.log(tr("queued", n=len(new), w=ms[0], h=ms[1], codec=CODEC_SHORT[codec]))
         self._refresh_area()
+        return len(new)
 
     def _add_row(self, f: Path, ms: tuple[int, int], codec: str):
         it = QListWidgetItem()
@@ -1559,19 +2344,68 @@ class MainWindow(QMainWindow):
         self._remove_paths(list(self.rows))
 
     def start_or_stop(self):
+        if self._checking:
+            return
         if self.running():
             self.log(tr("cancel_req"))
             self._cancelled = True
             self.worker.stop()
             return
+        self.begin(auto=False)
+
+    def _start_items(self, auto: bool, mark: bool = False) -> list:
+        """Startbare Eintraege. Automatisch (Ordnerueberwachung) nur wartende -
+        fehlerhafte oder abgebrochene Dateien werden nicht endlos wiederholt."""
+        states = ("wait",) if auto else ("wait", "error", "cancel")
         items = []
         for p, (it, row) in self.rows.items():
-            if row.state in ("wait", "error", "cancel"):
-                row.set_state("wait")
+            if row.state in states:
+                if mark:
+                    row.set_state("wait")
                 _p, ms, codec = it.data(Qt.UserRole)
                 items.append((Path(p), tuple(ms), codec))
+        return items
+
+    def begin(self, auto: bool):
+        """Erst Speicherplatz pruefen (im Hintergrund), dann rendern."""
+        items = self._start_items(auto)
         if not items:
             return
+        self.apply_output()
+        self.apply_scale()
+        self._checking = True
+        self._update_buttons()
+        self._update_footer()
+        self._disk = DiskCheck(self.ffmpeg, items, self)
+        self._disk.result.connect(lambda res, a=auto: self._disk_checked(res, a))
+        self._disk.start()
+
+    def _disk_checked(self, shortages: list, auto: bool):
+        self._disk.wait(2000)
+        self._disk = None
+        self._checking = False
+        self._update_buttons()
+        self._update_footer()
+        if shortages:
+            lines = "\n".join(tr("disk_line", loc=s.location,
+                                 need=diskcheck.human(s.need),
+                                 free=diskcheck.human(s.free)) for s in shortages)
+            if auto:  # niemand da, der gefragt werden koennte
+                self.log(tr("disk_not_started", lines=lines.replace("\n", " · ")))
+                return
+            box = QMessageBox(QMessageBox.Warning, tr("disk_title"),
+                              tr("disk_question", lines=lines), parent=self)
+            go = box.addButton(tr("disk_start"), QMessageBox.AcceptRole)
+            no = box.addButton(tr("disk_cancel"), QMessageBox.RejectRole)
+            box.setDefaultButton(no)
+            box.exec()
+            if box.clickedButton() is not go:
+                return
+        items = self._start_items(auto, mark=True)  # Liste kann sich geaendert haben
+        if items:
+            self._start_worker(items)
+
+    def _start_worker(self, items: list):
         self.worker = Worker(self.ffmpeg)
         self.worker.counts.connect(self.set_counts)
         self.worker.item_progress.connect(self._item_progress)
@@ -1588,6 +2422,7 @@ class MainWindow(QMainWindow):
         self._had_error = self._cancelled = False
         self.taskbar.set(0.0, "normal")
         self.worker.start()
+        self.apply_keep_awake()
         self._spin_i = 0
         self.spin_timer.start(140)
         self._update_buttons()
@@ -1601,6 +2436,11 @@ class MainWindow(QMainWindow):
             self.queue.scrollToItem(self.rows[path][0])
 
     def _item_done(self, path: str, result: str):
+        if path in self._redo:  # Quelle hat sich waehrend des Renderns geaendert
+            self._redo.discard(path)
+            if result == "done":
+                self._discard_proxy(Path(path))
+            QTimer.singleShot(0, lambda p=path: self._requeue(p))
         self._fracs.pop(path, None)
         if self._fracs:
             self.sampler.set_path(next(reversed(self._fracs)))
@@ -1613,6 +2453,12 @@ class MainWindow(QMainWindow):
             self._had_error = True
         if result == "error" and not self.b_log.isChecked():
             self.b_log.setChecked(True)  # bei Fehlern das Log zeigen
+
+    def _requeue(self, path: str):
+        src = Path(path)
+        base = core._BASES.get(path, src.parent.parent)
+        if self._enqueue([(src, base)], quiet=True) and not self.busy():
+            self.begin(auto=True)
 
     def _fade_out(self, path: str):
         if path in self.rows and self.rows[path][1].state in ("done", "skip"):
@@ -1629,7 +2475,7 @@ class MainWindow(QMainWindow):
         self.b_go.setText(f"■  {tr('btn_cancel')}" if run else tr("btn_start"))
         self.b_go.setProperty("stop", run)
         self.b_go.style().polish(self.b_go)
-        self.b_go.setEnabled(run or startable)
+        self.b_go.setEnabled((run or startable) and not self._checking)
         self.b_clear.setVisible(bool(self.rows))
 
     # -------------------------------------------------------------- Anzeige
@@ -1686,8 +2532,46 @@ class MainWindow(QMainWindow):
             g.hide()
         self._update_buttons()
         self._update_footer()
+        self.keep_awake.stop()
+        if self.after_action != "none" and not self._cancelled and not self.watching():
+            action, self.after_action = self.after_action, "none"  # nur einmal
+            QTimer.singleShot(0, lambda a=action: self._after_countdown(a))
 
-    SPIN = "-/|\\"  # waagerecht, diagonal, senkrecht, gespiegelt diagonal
+    AFTER_SECONDS = 60
+
+    def _after_countdown(self, action: str):
+        """Countdown mit Abbrechen-Knopf, dann Energiesparmodus/Herunterfahren."""
+        key = "after_sleep_in" if action == "sleep" else "after_shutdown_in"
+        left = [self.AFTER_SECONDS]
+        fire = [False]
+        box = QMessageBox(QMessageBox.Information, tr("after_title"),
+                          tr(key, s=left[0]), parent=self)
+        now = box.addButton(tr("after_now"), QMessageBox.AcceptRole)
+        abort = box.addButton(tr("after_abort"), QMessageBox.RejectRole)
+        box.setDefaultButton(abort)
+        timer = QTimer(box)
+
+        def tick():
+            left[0] -= 1
+            if left[0] <= 0:
+                timer.stop()
+                fire[0] = True
+                box.done(0)
+            else:
+                box.setText(tr(key, s=left[0]))
+
+        timer.timeout.connect(tick)
+        timer.start(1000)
+        box.exec()
+        timer.stop()
+        if not (fire[0] or box.clickedButton() is now):
+            return
+        try:
+            (power.sleep_computer if action == "sleep" else power.shutdown_computer)()
+        except Exception as exc:
+            self.log(tr("after_failed", err=exc))
+
+    SPIN ="-/|\\"  # waagerecht, diagonal, senkrecht, gespiegelt diagonal
 
     def _spin(self):
         self._spin_i = (self._spin_i + 1) % len(self.SPIN)
@@ -1709,6 +2593,10 @@ class MainWindow(QMainWindow):
                 self.total_label.setText(
                     f"{self._done}/{self._total} · {int(pos * 100)} %")
             self.spinner.setText(self.SPIN[self._spin_i])
+        elif self._checking:
+            self.footer.setText(f"> {tr('disk_checking')}")
+            self.total_label.setText("")
+            self.spinner.setText(" ")
         else:
             self.footer.setText(f"> {tr('idle')}")
             self.total_label.setText("")
@@ -1737,7 +2625,30 @@ class MainWindow(QMainWindow):
             self.taskbar.clear()
             self._had_error = self._cancelled = False
 
+    def _start_update_check(self):
+        self._update_checker = updater.UpdateChecker(APP_VERSION, self)
+        self._update_checker.result.connect(self._update_checked)
+        self._update_checker.start()
+
+    def _update_checked(self, ok: bool, newer: bool, tag: str, url: str):
+        if not (ok and newer):
+            return  # offline or up to date: stay silent
+        st = settings()
+        if str(st.value("update_dismissed", "")) == tag:
+            return  # user already said "later" for this version
+        if not ask_update(self, tag, url):
+            st.setValue("update_dismissed", tag)
+
     def closeEvent(self, e):
+        if self._update_checker and self._update_checker.isRunning():
+            self._update_checker.wait(8000)
+        if self.watcher is not None:
+            self.watcher.stop()
+            self.watcher.wait(5000)
+        if self._disk is not None:
+            self._disk.stop()
+            self._disk.wait(5000)
+        self.keep_awake.stop()
         self.sampler.stop()
         if self.worker and self.worker.isRunning():
             self.worker.stop()
@@ -1759,8 +2670,8 @@ QToolTip {{ background: #1c1d21; color: #e8e8ea; border: 1px solid #4a4c55; padd
 
 /* Kopf-Icons */
 QPushButton#icon {{ background: transparent; color: {t['text']};
-    border: 1.5px solid {t['help_border']}; border-radius: 14px; padding: 0;
-    font-size: 14px; font-weight: 700; }}
+    border: none; border-radius: 14px; padding: 0;
+    font-size: 17px; font-weight: 700; }}
 QPushButton#icon:hover {{ background: {t['panel']}; }}
 QPushButton#flag {{ background: transparent; border: none; padding: 2px; }}
 QPushButton#flag:hover {{ background: {t['panel']}; border-radius: 4px; }}
@@ -1779,7 +2690,7 @@ QPushButton#perf {{ background: transparent; color: {t['hint']};
 QPushButton#perf:checked {{ background: {t['start']}; color: {t['start_text']};
     border-color: {t['start']}; font-weight: 600; }}
 QPushButton#perf:hover {{ border-color: {t['text']}; }}
-QPushButton#themeBtn {{ background: transparent; border: 1.5px solid {t['help_border']};
+QPushButton#themeBtn {{ background: transparent; border: none;
     border-radius: 7px; padding: 0; }}
 QPushButton#themeBtn:hover {{ background: {t['panel']}; }}
 
@@ -1853,10 +2764,40 @@ QDialog#about QLabel {{ color: {TEXT}; }}
 #aboutSmall {{ color: #8b8d94; font-size: 11px; }}
 QDialog#about QPushButton {{ background: #2c2e35; color: white; }}
 QDialog#about QPushButton:hover {{ background: #383a43; }}
+
+/* Einstellungen: ebenfalls immer dunkel */
+QDialog#settings, QDialog#settings #setBody {{ background: {PANEL}; }}
+QDialog#settings QScrollArea {{ background: {PANEL}; border: none; }}
+QDialog#settings QScrollBar:vertical {{ background: {PANEL}; width: 10px; border: none; }}
+QDialog#settings QScrollBar::handle:vertical {{ background: #3a3d46; border-radius: 4px;
+    min-height: 24px; }}
+QDialog#settings QScrollBar::add-line, QDialog#settings QScrollBar::sub-line {{
+    width: 0; height: 0; }}
+QDialog#settings QLabel, QDialog#settings QCheckBox,
+QDialog#settings QRadioButton {{ color: {TEXT}; }}
+QDialog#settings #setHead {{ color: white; font-weight: 600; }}
+QDialog#settings #info {{ color: #8b8d94; font-size: 14px; padding: 0 2px; }}
+QDialog#settings QComboBox, QDialog#settings QLineEdit {{ background: #2c2e35;
+    color: {TEXT}; border: none; border-radius: 6px; padding: 5px 10px; }}
+QDialog#settings QLineEdit:disabled {{ color: #6b6d74; }}
+QDialog#settings QComboBox QAbstractItemView {{ background: #2c2e35; color: {TEXT};
+    selection-background-color: #3a3d46; border: none; outline: none; }}
+QDialog#settings QListWidget {{ background: #1c1d21; color: {TEXT}; border: none;
+    border-radius: 6px; font-family: {mono}; font-size: 12px; }}
+QDialog#settings QListWidget::item:selected {{ background: #3a3d46; color: white; }}
+QDialog#settings QPushButton {{ background: #2c2e35; color: white; }}
+QDialog#settings QPushButton:hover {{ background: #383a43; }}
+QDialog#settings QPushButton:disabled {{ color: #6b6d74; }}
+QDialog#settings QComboBox:disabled, QDialog#settings QCheckBox:disabled,
+QDialog#settings QRadioButton:disabled {{ color: #6b6d74; }}
 """
 
 
 def main():
+    if "--selftest" in sys.argv:  # Build pruefen, ohne Fenster zu zeigen
+        from . import selftest
+        i = sys.argv.index("--selftest")
+        sys.exit(selftest.run(sys.argv[i + 1] if len(sys.argv) > i + 1 else None))
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)

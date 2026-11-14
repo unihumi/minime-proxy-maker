@@ -126,7 +126,7 @@ def encode(
     info, scale = info_scale or plan(tool, src, min_size)
     w, h = core.output_size(info.width, info.height, min_size, codec)
     dst = core.proxy_path(src)
-    dst.parent.mkdir(exist_ok=True)
+    dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_name(dst.name + ".partial")
     workdir = Path(tempfile.mkdtemp(prefix="proxymaker_braw_"))
     try:

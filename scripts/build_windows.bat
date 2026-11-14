@@ -1,8 +1,8 @@
 @echo off
 setlocal
-rem Baut "Proxy Maker.exe" mit der neuesten FFmpeg-Version und - falls das
-rem Blackmagic RAW SDK installiert ist - mit BRAW-Unterstuetzung.
-rem Ergebnis: dist\Proxy Maker.exe
+rem Baut "Proxy Maker <Version>.exe" mit der neuesten FFmpeg-Version und - falls
+rem das Blackmagic RAW SDK installiert ist - mit BRAW-Unterstuetzung.
+rem Ergebnis: dist\Proxy Maker <Version>.exe (Version aus src\proxymaker\__init__.py)
 rem Always work from the repository root (this script lives in scripts\)
 cd /d "%~dp0.."
 
@@ -55,12 +55,19 @@ call .venv-build\Scripts\activate.bat
 python -m pip install --upgrade pip
 pip install -r requirements.txt pyinstaller pillow || goto :error
 
+rem Versionsnummer gehoert in den Dateinamen, z.B. "Proxy Maker 1.0.2.exe"
+set "VER="
+for /f "delims=" %%v in ('python -c "import sys; sys.path.insert(0, 'src'); from proxymaker import __version__; print(__version__)"') do set "VER=%%v"
+if not defined VER goto :error
+set "APPNAME=Proxy Maker %VER%"
+echo Version: %VER%
+
 set ICON=
 if exist assets\icon.png set ICON=--icon=assets\icon.png
 
 echo == Baue App ==
 pyinstaller --noconfirm --clean --windowed --onefile ^
-  --name "Proxy Maker" ^
+  --name "%APPNAME%" ^
   --add-data "assets;assets" ^
   --add-binary "ffbin\ffmpeg.exe;ffbin" ^
   %BRAW_ARG% ^
@@ -71,7 +78,7 @@ pyinstaller --noconfirm --clean --windowed --onefile ^
 rmdir /s /q build_tmp
 echo.
 if defined BRAW_SDK (echo BRAW: eingebaut) else (echo BRAW: NICHT eingebaut)
-echo Fertig: %cd%\dist\Proxy Maker.exe
+echo Fertig: %cd%\dist\%APPNAME%.exe
 if not defined CI (
   explorer dist
   pause

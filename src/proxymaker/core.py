@@ -1,7 +1,8 @@
 """Proxy Maker - Encoding-Logik (ohne GUI).
 
-Erzeugt ProRes-Proxy-Dateien in Viertelaufloesung in einem Unterordner
-"Proxy" neben der jeweiligen Quelldatei.
+Erzeugt Proxy-Dateien in 1:4, 1:2 oder 1:1 der Originalaufloesung (Standard
+1:4) in einem Unterordner "Proxy" neben der Quelldatei oder an einem
+zentralen Ort.
 """
 from __future__ import annotations
 
@@ -87,29 +88,70 @@ def is_braw(p: Path) -> bool:
     return p.suffix.lower() == ".braw"
 
 
-def collect(paths: Iterable[str | os.PathLike]) -> list[Path]:
-    """Dateien/Ordner -> sortierte Liste moeglicher Videodateien."""
-    found: dict[str, Path] = {}
+def _same_dir(a: str | os.PathLike, b: str | os.PathLike) -> bool:
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def collect_with_base(paths: Iterable[str | os.PathLike]) -> list[tuple[Path, Path]]:
+    """Dateien/Ordner -> [(Videodatei, Basisordner)].
+
+    Der Basisordner bestimmt, welcher Teil der Ordnerstruktur im zentralen
+    Proxy-Ordner nachgebaut wird: bei einem Ordner dessen Elternordner (der
+    Ordnername bleibt also erhalten), bei einer einzelnen Datei der Ordner
+    ueber ihrem Ordner.
+    """
+    found: dict[str, tuple[Path, Path]] = {}
+    root_out = OUTPUT["root"]
     for raw in paths:
         p = Path(raw)
         if p.is_dir():
             for root, dirs, files in os.walk(p):
-                # vorhandene Proxy-Ordner und versteckte Ordner auslassen
+                # vorhandene Proxy-Ordner, versteckte Ordner und den zentralen
+                # Proxy-Ordner auslassen (sonst wuerden Proxies zu Quellen)
                 dirs[:] = sorted(
                     d for d in dirs
                     if d.lower() != PROXY_DIRNAME.lower() and not d.startswith(".")
+                    and not (root_out and _same_dir(Path(root) / d, root_out))
                 )
                 for name in sorted(files):
                     f = Path(root) / name
                     if _is_candidate(f):
-                        found.setdefault(str(f), f)
+                        found.setdefault(str(f), (f, p.parent))
         elif p.is_file() and _is_candidate(p):
-            found.setdefault(str(p), p)
-    return [f for f in found.values() if not _is_r3d_followup_segment(f)]
+            found.setdefault(str(p), (p, p.parent.parent))
+    return [fb for fb in found.values() if not _is_r3d_followup_segment(fb[0])]
+
+
+def collect(paths: Iterable[str | os.PathLike]) -> list[Path]:
+    """Dateien/Ordner -> sortierte Liste moeglicher Videodateien."""
+    return [f for f, _base in collect_with_base(paths)]
+
+
+# Ziel der Proxies: root None = Unterordner "Proxy" neben der Quelle (Resolve
+# verknuepft dann automatisch), sonst alles unter root mit nachgebauter
+# Ordnerstruktur. Die App setzt das; waehrend des Renderns bleibt es fest.
+OUTPUT: dict[str, Optional[Path]] = {"root": None}
+_BASES: dict[str, Path] = {}  # Quelldatei -> Basisordner (siehe collect_with_base)
+
+
+def set_output_root(root: Optional[str | os.PathLike]) -> None:
+    OUTPUT["root"] = Path(root) if root else None
+
+
+def remember_base(src: Path, base: Path) -> None:
+    _BASES[str(src)] = base
 
 
 def proxy_path(src: Path) -> Path:
-    return src.parent / PROXY_DIRNAME / (src.stem + ".mov")
+    root = OUTPUT["root"]
+    if root is None:
+        return src.parent / PROXY_DIRNAME / (src.stem + ".mov")
+    base = _BASES.get(str(src), src.parent.parent)
+    try:
+        rel = src.parent.relative_to(base)
+    except ValueError:
+        rel = Path(src.parent.name)
+    return root / rel / (src.stem + ".mov")
 
 
 @dataclass
@@ -122,6 +164,7 @@ class MediaInfo:
     color: tuple = ("", "", "")                          # (Matrix, Primaries, Transfer) der Quelle
     audio_codecs: list = field(default_factory=list)     # je Tonspur, in Reihenfolge
     wb: Optional[tuple] = None                           # (R, B)-Verstaerkung, nur RAW
+    fps: float = 0.0                                     # 0 wenn unbekannt
 
 
 _RE_VIDEO = re.compile(r"Stream #\d+:\d+.*?: Video: .*?\b(\d{2,5})x(\d{2,5})\b")
@@ -131,6 +174,7 @@ _RE_ACODEC = re.compile(r"Stream #\d+:\d+.*?: Audio: (\w+)")
 _RE_COLOR = re.compile(r"\((?:tv|pc)(?:,\s*([\w-]+)(?:/([\w-]+)/([\w-]+))?)?")
 _RE_DUR = re.compile(r"Duration: (\d+):(\d\d):(\d\d(?:\.\d+)?)")
 _RE_TC = re.compile(r"timecode\s*:\s*(\d\d:\d\d:\d\d[:;]\d\d)")
+_RE_FPS = re.compile(r"(\d+(?:\.\d+)?) fps")
 
 
 def probe(ffmpeg: str, src: Path) -> Optional[MediaInfo]:
@@ -144,6 +188,7 @@ def probe(ffmpeg: str, src: Path) -> Optional[MediaInfo]:
     except Exception:
         return None
     size = None
+    fps = 0.0
     color = ("", "", "")
     vcodec = ""
     acodecs: list[str] = []
@@ -159,6 +204,8 @@ def probe(ffmpeg: str, src: Path) -> Optional[MediaInfo]:
             size = (int(m.group(1)), int(m.group(2)))
             v = _RE_VCODEC.search(line)
             vcodec = v.group(1) if v else ""
+            r = _RE_FPS.search(line)
+            fps = float(r.group(1)) if r else 0.0
             c = _RE_COLOR.search(line)
             if c and c.group(1) and c.group(1) != "progressive":
                 mat = c.group(1)
@@ -171,7 +218,7 @@ def probe(ffmpeg: str, src: Path) -> Optional[MediaInfo]:
         dur = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
     m = _RE_TC.search(out)
     return MediaInfo(size[0], size[1], dur, m.group(1) if m else None,
-                     vcodec, color, acodecs)
+                     vcodec, color, acodecs, fps=fps)
 
 
 # Tonspuren, die bit-genau ins MOV kopiert werden koennen; alles andere -> PCM 24 Bit
@@ -247,6 +294,7 @@ def proxy_metadata(src: Path, codec: str, min_size: tuple[int, int],
         "com.steeptwo.proxymaker.decoder": decoder,
         "com.steeptwo.proxymaker.source": src.name,
         "com.steeptwo.proxymaker.min_resolution": f"{min_size[0]}x{min_size[1]}",
+        "com.steeptwo.proxymaker.scale": f"1:{SCALE['divisor']}",
         "com.steeptwo.proxymaker.created": datetime.datetime.now()
                                             .astimezone().isoformat(timespec="seconds"),
     }
@@ -311,15 +359,27 @@ def measure_wb(ffmpeg: str, src: Path, duration: float) -> Optional[tuple]:
     return gr, gb
 
 
+# Verkleinerung der Proxies: 4 = 1:4 (Viertel, Standard), 2 = 1:2, 1 = 1:1.
+# Die App setzt das vor jedem Renderstart; waehrend des Renderns bleibt es fest.
+SCALES = (4, 2, 1)
+DEFAULT_SCALE = 4
+SCALE = {"divisor": DEFAULT_SCALE}
+
+
+def set_scale(divisor: int) -> None:
+    SCALE["divisor"] = divisor if divisor in SCALES else DEFAULT_SCALE
+
+
 def scale_factor(width: int, height: int,
                  min_size: tuple[int, int] = DEFAULT_MIN) -> float:
-    """1/4 der Quelle; Breite >= min_w UND Hoehe >= min_h; nie hochskalieren.
+    """1:4, 1:2 oder 1:1 der Quelle (siehe SCALE); Breite >= min_w UND
+    Hoehe >= min_h; nie hochskalieren.
 
     Das Seitenverhaeltnis bleibt immer erhalten: Es wird so weit
     verkleinert, wie es beide Mindestwerte zulassen.
     """
     min_w, min_h = min_size
-    return min(1.0, max(0.25, min_w / width, min_h / height))
+    return min(1.0, max(1 / SCALE["divisor"], min_w / width, min_h / height))
 
 
 def target_size(width: int, height: int,
@@ -417,7 +477,7 @@ def encode(
 ) -> Path:
     """Encodiert src -> Proxy/<name>.mov. Wirft RuntimeError bei Fehlern."""
     dst = dst or proxy_path(src)
-    dst.parent.mkdir(exist_ok=True)
+    dst.parent.mkdir(parents=True, exist_ok=True)
     if info.vcodec in RAW_WB_CODECS and info.wb is None:
         info.wb = measure_wb(ffmpeg, src, info.duration)
     tmp = dst.with_name(dst.name + ".partial")

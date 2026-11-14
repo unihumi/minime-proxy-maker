@@ -1,7 +1,7 @@
 #!/bin/bash
-# Baut "Proxy Maker.app" (Apple Silicon) mit der neuesten FFmpeg-Version
+# Baut "Proxy Maker <Version>.app" (Apple Silicon) mit der neuesten FFmpeg-Version
 # und - falls das Blackmagic RAW SDK installiert ist - mit BRAW-Unterstuetzung.
-# Ergebnis: dist/Proxy Maker.app
+# Ergebnis: dist/Proxy Maker <Version>.app (Version aus src/proxymaker/__init__.py)
 # Always work from the repository root (this script lives in scripts/)
 cd "$(dirname "$0")/.." || exit 1
 set -e
@@ -59,6 +59,11 @@ source .venv-build/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt pyinstaller pillow
 
+# Versionsnummer gehoert in den Dateinamen, z.B. "Proxy Maker 1.0.2.app"
+VER=$(python3 -c "import sys; sys.path.insert(0, 'src'); from proxymaker import __version__; print(__version__)")
+[ -n "$VER" ] || { echo "Version nicht gefunden"; exit 1; }
+echo "Version: $VER"
+
 ICON=""
 [ -f assets/icon.png ] && ICON="--icon=assets/icon.png"
 
@@ -71,7 +76,10 @@ pyinstaller --noconfirm --clean --windowed \
   $ICON \
   src/proxymaker/__main__.py
 
-APP="dist/Proxy Maker.app"
+# Nur der Dateiname bekommt die Version - der Name im Menue bleibt "Proxy Maker"
+APP="dist/Proxy Maker $VER.app"
+rm -rf "$APP"
+mv "dist/Proxy Maker.app" "$APP"
 if [ -d brawlib ]; then
   # Framework mit Symlinks unveraendert ins Bundle kopieren, dann neu signieren
   ditto brawlib "$APP/Contents/Resources/brawlib"

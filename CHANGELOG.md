@@ -4,6 +4,46 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## [1.0.2] – 2026-11-14
+
+### Added
+- **Settings window** (⚙ button) for the options below, so the main window
+  stays simple.
+- **Proxy size:** 1:4 (quarter resolution, default), 1:2 (half) or 1:1
+  (full), chosen in Settings. The minimum resolution still applies. The chosen
+  size is stored in the proxy's metadata.
+- **Proxy location:** next to the source files (`Proxy` folder, linked
+  automatically by DaVinci Resolve) or all in one location, with the source
+  folder structure recreated there.
+- **Watch folders:** new video files in chosen folders (including subfolders)
+  are queued and rendered automatically once they have been unchanged for
+  about 30 seconds (finished copying). If a source file changes after its
+  proxy was started (e.g. a paused copy resumed), that proxy is deleted and
+  re-created. Proxies that existed before are never touched. A pulsing green
+  dot in the status bar shows that watching is active; it turns amber (and the
+  log says so) if a watched folder can't be reached, e.g. a disconnected
+  network drive.
+- **Disk space check** before rendering, with a warning if the proxies will
+  probably not fit (also on network drives). Each file is additionally skipped
+  with an error if less than 512 MB are left at the destination.
+- **Keep the computer awake** while rendering (on by default).
+- **When finished:** do nothing, sleep or shut down, with a 60-second
+  countdown that can be cancelled. Applies to the current session only.
+- **Update notification:** the app checks GitHub for a newer release at
+  startup and asks whether to open the download page. Can be switched off or
+  run manually in Settings. Nothing is downloaded automatically.
+- About window now lists the supported source formats (R3D, BRAW, ProRes RAW,
+  everything FFmpeg can read).
+
+- Hidden `--selftest` option that checks a build (bundled files, FFmpeg, a
+  real render with every codec, BRAW helper, windows) and writes a report.
+
+### Changed
+- The app's file name includes the version, e.g. `Proxy Maker 1.0.2.exe` /
+  `Proxy Maker 1.0.2.app`.
+- The default proxy format moved from the main window to Settings. Each file
+  in the queue can still be switched individually.
+
 ## [1.0.1] – 2026-11-12
 
 ### Added
