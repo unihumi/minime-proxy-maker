@@ -11,7 +11,7 @@ from typing import Optional
 
 from PySide6.QtCore import QThread, Signal
 
-REPO = "unihumi/proxymaker"
+REPO = "unihumi/minime-proxy-maker"  # renamed from unihumi/proxymaker (GitHub redirects the old name)
 API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_URL = f"https://github.com/{REPO}/releases/latest"
 TIMEOUT = 6  # seconds
@@ -35,7 +35,7 @@ def fetch_latest() -> tuple[str, str]:
     """Returns (tag, release page URL). Raises on network or parse errors."""
     req = urllib.request.Request(API_URL, headers={
         "Accept": "application/vnd.github+json",
-        "User-Agent": "ProxyMaker-update-check",
+        "User-Agent": "MiniMe-update-check",
     })
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         data = json.load(r)
